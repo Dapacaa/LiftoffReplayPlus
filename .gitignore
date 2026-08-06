@@ -1,0 +1,24 @@
+# Build output and distributable artifacts
+[Bb]in/
+[Oo]bj/
+*.dll
+*.pdb
+*.zip
+release/
+
+# Local investigation output and tool state
+types.txt
+.agents/
+.playwright-mcp/
+*.log
+
+# Media hosted as release assets, not part of the repo
+*.gif
+*.png
+
+# IDE and user-specific settings
+.vs/
+.idea/
+*.user
+*.suo
+*.userprefs

@@ -1,0 +1,87 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>LiftoffReplayPlus</AssemblyName>
+    <Description>Replay tools and ghost-line visualization for Liftoff</Description>
+    <Authors>Dapacaa</Authors>
+    <Version>1.0.0</Version>
+    <LiftoffDir Condition="'$(LiftoffDir)' == ''">D:\SteamLibrary\steamapps\common\Liftoff</LiftoffDir>
+    <GameManagedDir Condition="'$(GameManagedDir)' == ''">$(LiftoffDir)\Liftoff_Data\Managed</GameManagedDir>
+    <BepInExCoreDir Condition="'$(BepInExCoreDir)' == ''">$(LiftoffDir)\BepInEx\core</BepInExCoreDir>
+  </PropertyGroup>
+
+  <Target Name="ValidateLiftoffReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(BepInExCoreDir)\BepInEx.dll')"
+           Text="BepInEx.dll was not found. Set LiftoffDir to your Liftoff installation directory." />
+    <Error Condition="!Exists('$(BepInExCoreDir)\0Harmony.dll')"
+           Text="0Harmony.dll was not found. Set LiftoffDir to your Liftoff installation directory." />
+    <Error Condition="!Exists('$(GameManagedDir)\Assembly-CSharp.dll')"
+           Text="Assembly-CSharp.dll was not found. Set LiftoffDir to your Liftoff installation directory." />
+  </Target>
+
+  <ItemGroup>
+    <!-- BepInEx Core Reference -->
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCoreDir)\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- The Harmony library for patching -->
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExCoreDir)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Unity Core References -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(GameManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(GameManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(GameManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- The Unity Input library (Required for keyboard F8 press) -->
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(GameManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Unity IMGUI module for OnGUI debug text -->
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(GameManagedDir)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Unity UI module for Canvas access -->
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(GameManagedDir)\UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Unity UI for Slider component -->
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(GameManagedDir)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Text Rendering for TextAnchor -->
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(GameManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- The Game's Main Code (Where LocalGhostStatesRecording lives) -->
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
