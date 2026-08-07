@@ -27,6 +27,7 @@ namespace LiftoffGhostLines
         public static bool showNameTags = true;
         public static bool linesThroughObjects = false;
         public static float speedHeatmapMaxSpeedMps = 1f;
+        public static float speedHeatmapMinSpeedMps = 0f;
         private const int SMOOTH_STEPS = 8;
         private const float METERS_PER_WORLD_UNIT = 1f;
         private const float SPEED_SAMPLE_WINDOW_SECONDS = 0.12f;
@@ -1071,18 +1072,42 @@ namespace LiftoffGhostLines
 
         public static Color SpeedHeatmapColor(float normalizedSpeed)
         {
-            // Most racing speeds cluster near the shared 95th-percentile scale.
-            // Bias toward red so smaller speed changes remain visible on the line.
-            float value = Mathf.Pow(Mathf.Clamp01(normalizedSpeed), 3f);
+            // The auto-range already stretches the gradient across the observed
+            // speed band, so map linearly for an even red->orange->yellow->green spread.
+            float value = Mathf.Clamp01(normalizedSpeed);
             Color slowRed = new Color(1f, 0.02f, 0.06f);
             Color mediumOrange = new Color(1f, 0.35f, 0.02f);
             Color fastYellow = new Color(1f, 0.95f, 0.02f);
             Color fastGreen = new Color(0.05f, 1f, 0.12f);
             if (value < 0.35f)
                 return Color.Lerp(slowRed, mediumOrange, value / 0.35f);
-            if (value < 0.65f)
-                return Color.Lerp(mediumOrange, fastYellow, (value - 0.35f) / 0.3f);
-            return Color.Lerp(fastYellow, fastGreen, (value - 0.65f) / 0.35f);
+            if (value < 0.6f)
+                return Color.Lerp(mediumOrange, fastYellow, (value - 0.35f) / 0.25f);
+            return Color.Lerp(fastYellow, fastGreen, (value - 0.6f) / 0.4f);
+        }
+
+        public static void GetSpeedHeatmapClampRange(out float minMps, out float maxMps)
+        {
+            float autoMps = Mathf.Max(speedHeatmapMaxSpeedMps, 1f);
+            float autoMin = Mathf.Clamp(speedHeatmapMinSpeedMps, 0f, autoMps * 0.95f);
+            float spread = autoMps - autoMin;
+            if (spread < autoMps * 0.25f)
+            {
+                autoMin = 0f;
+                autoMps = Mathf.Max(autoMps, 1f);
+            }
+            minMps = autoMin;
+            maxMps = autoMps;
+        }
+
+        private static float NormalizeHeatmapSpeed(float speedMps)
+        {
+            if (speedHeatmapMaxSpeedMps <= 0.0001f)
+                return 0f;
+            float minMps, maxMps;
+            GetSpeedHeatmapClampRange(out minMps, out maxMps);
+            float range = Mathf.Max(maxMps - minMps, 0.0001f);
+            return Mathf.Clamp01((speedMps - minMps) / range);
         }
 
         private static Gradient BuildSpeedHeatmapGradient(GhostLineEntry entry)
@@ -1107,7 +1132,7 @@ namespace LiftoffGhostLines
                 {
                     float speed = InterpolateSpeedAtDistance(entry.speedSamples, entry.pathDistances, normalized * totalDistance);
                     if (IsFinite(speed))
-                        color = SpeedHeatmapColor(speedHeatmapMaxSpeedMps <= 0.0001f ? 0f : speed / speedHeatmapMaxSpeedMps);
+                        color = SpeedHeatmapColor(NormalizeHeatmapSpeed(speed));
                 }
                 colorKeys[i] = new GradientColorKey(color, normalized);
             }
@@ -1212,27 +1237,45 @@ namespace LiftoffGhostLines
             }
 
             if (weightedSpeeds.Count == 0)
+            {
+                speedHeatmapMinSpeedMps = 0f;
                 return 1f;
+            }
 
             weightedSpeeds.Sort((a, b) => a.x.CompareTo(b.x));
             float totalWeight = 0f;
             foreach (Vector2 sample in weightedSpeeds)
                 totalWeight += sample.y;
-            float targetWeight = totalWeight * 0.95f;
+
+            float lowPercentile = weightedSpeeds[0].x;
+            float highPercentile = weightedSpeeds[weightedSpeeds.Count - 1].x;
             float accumulated = 0f;
-            float percentile = weightedSpeeds[weightedSpeeds.Count - 1].x;
+            float lowTarget = totalWeight * 0.2f;
             foreach (Vector2 sample in weightedSpeeds)
             {
                 accumulated += sample.y;
-                if (accumulated >= targetWeight)
+                if (accumulated >= lowTarget)
                 {
-                    percentile = sample.x;
+                    lowPercentile = sample.x;
+                    break;
+                }
+            }
+            accumulated = 0f;
+            float highTarget = totalWeight * 0.95f;
+            foreach (Vector2 sample in weightedSpeeds)
+            {
+                accumulated += sample.y;
+                if (accumulated >= highTarget)
+                {
+                    highPercentile = sample.x;
                     break;
                 }
             }
 
-            float roundedKmh = Mathf.Ceil(percentile * 3.6f / 5f) * 5f;
-            return Mathf.Max(roundedKmh / 3.6f, 1f);
+            float roundedKmh = Mathf.Ceil(highPercentile * 3.6f / 5f) * 5f;
+            float maxMps = Mathf.Max(roundedKmh / 3.6f, 1f);
+            speedHeatmapMinSpeedMps = Mathf.Clamp(lowPercentile, 0f, maxMps * 0.95f);
+            return maxMps;
         }
 
         private static Texture2D BuildSpeedHeatmapTexture(GhostLineEntry entry)
@@ -1255,7 +1298,7 @@ namespace LiftoffGhostLines
                     float distance = ((x + 0.5f) / SPEED_HEATMAP_TEXTURE_WIDTH) * totalDistance;
                     float speed = InterpolateSpeedAtDistance(entry.speedSamples, entry.pathDistances, distance);
                     if (IsFinite(speed))
-                        color = SpeedHeatmapColor(speedHeatmapMaxSpeedMps <= 0.0001f ? 0f : speed / speedHeatmapMaxSpeedMps);
+                        color = SpeedHeatmapColor(NormalizeHeatmapSpeed(speed));
                 }
                 texture.SetPixel(x, 0, color);
             }
@@ -1449,6 +1492,40 @@ public class GhostLinePoller : MonoBehaviour
         private float bindingsFadeAmount = 0f;
         private bool bindingsDragCandidate = false;
         private Vector2 bindingsDragOffset = Vector2.zero;
+        private class StickGraphState
+        {
+            public GhostLineEntry pilot;
+            public Rect rect = new Rect(-1f, -1f, 460f, 320f);
+            public bool pinned;
+            public bool dragging;
+            public bool dragCandidate;
+            public Vector2 dragOffset;
+            public float fadeAmount;
+            public int channel;
+            public bool channelDropdown;
+            public bool resizing;
+            public int resizeEdge;
+            public int edgeHover;
+            public Vector2 resizeStartMouse;
+            public Rect resizeStartRect;
+            public string cachedTitle;
+            public float cachedTitleWidth = -1f;
+            public string cachedPilotName = "";
+        }
+
+        private List<StickGraphState> stickGraphs = new List<StickGraphState>();
+        private const float STICK_GRAPH_MIN_WIDTH = 320f;
+        private const float STICK_GRAPH_MIN_HEIGHT = 200f;
+        private const float STICK_GRAPH_EDGE_THICK = 6f;
+        private const float STICK_GRAPH_CORNER_GRAB = 14f;
+        private const int STICK_GRAPH_EDGE_RIGHT = 1;
+        private const int STICK_GRAPH_EDGE_BOTTOM = 2;
+        private const int STICK_GRAPH_EDGE_LEFT = 4;
+        private const int STICK_GRAPH_EDGE_TOP = 8;
+        private const float STICK_GRAPH_OPEN_OFFSET = 28f;
+        private float lastStickCamClickTime = -1f;
+        private Vector2 lastStickCamClickPos;
+        private static readonly string[] stickGraphChannelNames = { "Throttle", "Yaw", "Roll", "Pitch" };
         private float replayEnterTime = 0f;
         private bool replayReady = false;
         private object activeReplayRace;
@@ -1774,6 +1851,7 @@ public class GhostLinePoller : MonoBehaviour
         private GUIStyle settingsLabelStyle;
         private GUIStyle settingsSmallStyle;
         private GUIStyle settingsSmallCenterStyle;
+        private GUIStyle settingsAxisLabelStyle;
         private GUIStyle settingsHeaderStyle;
         private GUIStyle settingsSectionStyle;
         private GUIStyle playbackTimeLeftStyle;
@@ -2495,6 +2573,7 @@ public class GhostLinePoller : MonoBehaviour
             playbackPinned = false;
             settingsPinned = false;
             settingsFadeAmount = 0f;
+            stickGraphs.Clear();
             xrayEnabled = false;
             xrayStructuresBuilt = false;
             xrayStructures.Clear();
@@ -2602,6 +2681,7 @@ public class GhostLinePoller : MonoBehaviour
             playbackPinned = false;
             settingsPinned = false;
             settingsFadeAmount = 0f;
+            stickGraphs.Clear();
             settingsDragging = false;
             settingsRect = new Rect(-1f, -1f, 304f, 360f);
             sliderComponent = null;
@@ -6451,10 +6531,22 @@ public class GhostLinePoller : MonoBehaviour
             Vector2 mp = ev.mousePosition;
             if (ev.type == EventType.MouseDown && ev.button == 0 && totalRect.Contains(mp))
             {
-                draggingStickCam = true;
-                stickCamPositionCustomized = true;
-                dragStartMouse = mp;
-                dragStartStickCamPos = new Vector2(stickCamX, stickCamY);
+                if (Time.realtimeSinceStartup - lastStickCamClickTime < 0.35f &&
+                    (mp - lastStickCamClickPos).sqrMagnitude < 36f)
+                {
+                    lastStickCamClickTime = -1f;
+                    draggingStickCam = false;
+                    OpenStickGraph();
+                }
+                else
+                {
+                    lastStickCamClickTime = Time.realtimeSinceStartup;
+                    lastStickCamClickPos = mp;
+                    draggingStickCam = true;
+                    stickCamPositionCustomized = true;
+                    dragStartMouse = mp;
+                    dragStartStickCamPos = new Vector2(stickCamX, stickCamY);
+                }
                 ev.Use();
             }
             if (draggingStickCam)
@@ -6478,6 +6570,475 @@ public class GhostLinePoller : MonoBehaviour
             EnsureStickTextures();
             DrawStickPanel(leftPanel, leftStick);
             DrawStickPanel(rightPanel, rightStick);
+        }
+
+        private void OpenStickGraph()
+        {
+            GhostLineEntry pilot = spectatedEntry;
+            if (pilot == null || pilot.originalInputs == null ||
+                pilot.stateTimes == null || pilot.stateTimes.Length < 2 ||
+                !GhostLinesPlugin.entries.Contains(pilot))
+                return;
+
+            for (int i = 0; i < stickGraphs.Count; i++)
+            {
+                if (stickGraphs[i].pilot == pilot)
+                {
+                    StickGraphState existing = stickGraphs[i];
+                    stickGraphs.RemoveAt(i);
+                    stickGraphs.Add(existing);
+                    existing.fadeAmount = 1f;
+                    return;
+                }
+            }
+
+            StickGraphState state = new StickGraphState();
+            state.pilot = pilot;
+            state.fadeAmount = 1f;
+            int count = stickGraphs.Count;
+            state.rect = new Rect(
+                Screen.width * 0.5f - state.rect.width * 0.5f + count * STICK_GRAPH_OPEN_OFFSET,
+                Screen.height * 0.5f - state.rect.height * 0.5f + count * STICK_GRAPH_OPEN_OFFSET,
+                state.rect.width,
+                state.rect.height);
+            stickGraphs.Add(state);
+        }
+
+        private void EnsureStickGraphRect(StickGraphState g, bool initializePosition = true)
+        {
+            if (initializePosition && g.rect.x < 0f)
+            {
+                g.rect = new Rect(
+                    Screen.width - g.rect.width - 24f,
+                    120f,
+                    g.rect.width,
+                    g.rect.height);
+            }
+            g.rect.x = Mathf.Clamp(g.rect.x, 12f, Mathf.Max(12f, Screen.width - g.rect.width - 12f));
+            g.rect.y = Mathf.Clamp(g.rect.y, 12f, Mathf.Max(12f, Screen.height - g.rect.height - 12f));
+        }
+
+        private static Rect GetStickGraphOptionRect(Rect ddBtn, int index)
+        {
+            return new Rect(ddBtn.x, ddBtn.yMax + 2f + 20f * index, ddBtn.width, 20f);
+        }
+
+        private float SampleStickChannel(GhostLineEntry entry, float stateTime, int channel)
+        {
+            float[] times = entry.stateTimes;
+            Vector4[] inputs = entry.originalInputs;
+            int count = Mathf.Min(times.Length, inputs.Length);
+            if (count == 0)
+                return 0f;
+
+            int lo = 0;
+            int hi = count - 1;
+            if (stateTime <= times[0])
+            {
+                lo = 0;
+                hi = 0;
+            }
+            else if (stateTime >= times[hi])
+            {
+                lo = hi;
+            }
+            else
+            {
+                int low = 0;
+                int high = count - 1;
+                while (high - low > 1)
+                {
+                    int mid = (low + high) / 2;
+                    if (times[mid] <= stateTime) low = mid;
+                    else high = mid;
+                }
+                lo = low;
+                hi = high;
+            }
+
+            Vector4 input;
+            if (lo == hi)
+                input = inputs[lo];
+            else
+            {
+                float t0 = times[lo];
+                float t1 = times[hi];
+                float u = Mathf.Approximately(t1, t0) ? 0f : Mathf.InverseLerp(t0, t1, stateTime);
+                input = Vector4.LerpUnclamped(inputs[lo], inputs[hi], u);
+            }
+
+            switch (channel)
+            {
+                case 0: return Mathf.Clamp(input.x * 2f - 1f, -1f, 1f);
+                case 1: return Mathf.Clamp(input.y, -1f, 1f);
+                case 2: return Mathf.Clamp(-input.w, -1f, 1f);
+                default: return Mathf.Clamp(input.z, -1f, 1f);
+            }
+        }
+
+        private void DrawStickGraph()
+        {
+            if (stickGraphs.Count == 0)
+                return;
+
+            EnsureSettingsStyles();
+            EnsureSettingsTextures();
+            EnsureIcons();
+
+            Event e = Event.current;
+            for (int gi = 0; gi < stickGraphs.Count; gi++)
+            {
+                StickGraphState g = stickGraphs[gi];
+                if (g.pilot == null || g.pilot.originalInputs == null ||
+                    g.pilot.stateTimes == null || g.pilot.stateTimes.Length < 2 ||
+                    !GhostLinesPlugin.entries.Contains(g.pilot))
+                {
+                    stickGraphs.RemoveAt(gi);
+                    gi--;
+                    continue;
+                }
+
+                EnsureStickGraphRect(g);
+                Rect panel = g.rect;
+                float alpha = g.fadeAmount;
+                if (alpha < 0.01f)
+                    continue;
+
+                Color old = GUI.color;
+
+                GUI.color = new Color(0f, 0f, 0f, 0.2f * alpha);
+                GUI.DrawTexture(new Rect(panel.x, panel.y + 3f, panel.width, panel.height), whiteTex);
+                GUI.color = ThemePanelBg(alpha);
+                GUI.DrawTexture(panel, whiteTex);
+                GUI.color = ThemePanelBorder(alpha);
+                GUI.DrawTexture(new Rect(panel.x, panel.y, panel.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(panel.x, panel.yMax - 1f, panel.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(panel.x, panel.y, 1f, panel.height), whiteTex);
+                GUI.DrawTexture(new Rect(panel.xMax - 1f, panel.y, 1f, panel.height), whiteTex);
+
+                float titleH = 30f;
+                Rect close = new Rect(panel.xMax - 30f, panel.y + 5f, 22f, 20f);
+                Rect pin = new Rect(panel.xMax - 60f, panel.y + 5f, 22f, 20f);
+                float ddW = 96f;
+                Rect ddBtn = new Rect(panel.xMax - 178f, panel.y + 6f, ddW, 18f);
+                Rect titleRect = new Rect(panel.x + 12f, panel.y + 4f, Mathf.Max(20f, ddBtn.x - panel.x - 22f), 20f);
+
+                bool inTitleControls = close.Contains(e.mousePosition) || pin.Contains(e.mousePosition) || ddBtn.Contains(e.mousePosition);
+
+                float edgeT = STICK_GRAPH_EDGE_THICK;
+                float cornerT = STICK_GRAPH_CORNER_GRAB;
+                Rect edgeTop = new Rect(panel.x, panel.y, panel.width, edgeT);
+                Rect edgeBottom = new Rect(panel.x, panel.yMax - edgeT, panel.width, edgeT);
+                Rect edgeLeft = new Rect(panel.x, panel.y, edgeT, panel.height);
+                Rect edgeRight = new Rect(panel.xMax - edgeT, panel.y, edgeT, panel.height);
+                Rect cornerTopLeft = new Rect(panel.x, panel.y, cornerT, cornerT);
+                Rect cornerTopRight = new Rect(panel.xMax - cornerT, panel.y, cornerT, cornerT);
+                Rect cornerBottomLeft = new Rect(panel.x, panel.yMax - cornerT, cornerT, cornerT);
+                Rect cornerBottomRight = new Rect(panel.xMax - cornerT, panel.yMax - cornerT, cornerT, cornerT);
+
+                int hoverEdge = 0;
+                if (!inTitleControls && !g.channelDropdown)
+                {
+                    if (cornerTopLeft.Contains(e.mousePosition))
+                        hoverEdge = STICK_GRAPH_EDGE_LEFT | STICK_GRAPH_EDGE_TOP;
+                    else if (cornerTopRight.Contains(e.mousePosition))
+                        hoverEdge = STICK_GRAPH_EDGE_RIGHT | STICK_GRAPH_EDGE_TOP;
+                    else if (cornerBottomLeft.Contains(e.mousePosition))
+                        hoverEdge = STICK_GRAPH_EDGE_LEFT | STICK_GRAPH_EDGE_BOTTOM;
+                    else if (cornerBottomRight.Contains(e.mousePosition))
+                        hoverEdge = STICK_GRAPH_EDGE_RIGHT | STICK_GRAPH_EDGE_BOTTOM;
+                    else
+                    {
+                        if (edgeRight.Contains(e.mousePosition)) hoverEdge |= STICK_GRAPH_EDGE_RIGHT;
+                        if (edgeBottom.Contains(e.mousePosition)) hoverEdge |= STICK_GRAPH_EDGE_BOTTOM;
+                        if (edgeLeft.Contains(e.mousePosition)) hoverEdge |= STICK_GRAPH_EDGE_LEFT;
+                        if (edgeTop.Contains(e.mousePosition)) hoverEdge |= STICK_GRAPH_EDGE_TOP;
+                    }
+                }
+                g.edgeHover = hoverEdge;
+
+                int shownEdges = g.resizing ? g.resizeEdge : g.edgeHover;
+                if (shownEdges != 0)
+                {
+                    GUI.color = new Color(0.25f, 0.62f, 0.95f, 0.55f * alpha);
+                    if ((shownEdges & STICK_GRAPH_EDGE_LEFT) != 0)
+                        GUI.DrawTexture(edgeLeft, whiteTex);
+                    if ((shownEdges & STICK_GRAPH_EDGE_RIGHT) != 0)
+                        GUI.DrawTexture(edgeRight, whiteTex);
+                    if ((shownEdges & STICK_GRAPH_EDGE_TOP) != 0)
+                    {
+                        float leftTrim = (shownEdges & STICK_GRAPH_EDGE_LEFT) != 0 ? edgeT : 0f;
+                        float rightTrim = (shownEdges & STICK_GRAPH_EDGE_RIGHT) != 0 ? edgeT : 0f;
+                        GUI.DrawTexture(new Rect(panel.x + leftTrim, panel.y, panel.width - leftTrim - rightTrim, edgeT), whiteTex);
+                    }
+                    if ((shownEdges & STICK_GRAPH_EDGE_BOTTOM) != 0)
+                    {
+                        float leftTrim = (shownEdges & STICK_GRAPH_EDGE_LEFT) != 0 ? edgeT : 0f;
+                        float rightTrim = (shownEdges & STICK_GRAPH_EDGE_RIGHT) != 0 ? edgeT : 0f;
+                        GUI.DrawTexture(new Rect(panel.x + leftTrim, panel.yMax - edgeT, panel.width - leftTrim - rightTrim, edgeT), whiteTex);
+                    }
+                }
+
+                if (e.type == EventType.MouseDown && e.button == 0 && g.edgeHover != 0)
+                {
+                    g.resizing = true;
+                    g.resizeEdge = g.edgeHover;
+                    g.resizeStartMouse = e.mousePosition;
+                    g.resizeStartRect = g.rect;
+                    g.dragCandidate = false;
+                    g.dragging = false;
+                    g.channelDropdown = false;
+                    e.Use();
+                }
+                if (g.resizing && e.type == EventType.MouseDrag && e.button == 0)
+                {
+                    float dx = e.mousePosition.x - g.resizeStartMouse.x;
+                    float dy = e.mousePosition.y - g.resizeStartMouse.y;
+                    float newX = g.resizeStartRect.x;
+                    float newY = g.resizeStartRect.y;
+                    float newW = g.resizeStartRect.width;
+                    float newH = g.resizeStartRect.height;
+                    float maxW = Mathf.Max(STICK_GRAPH_MIN_WIDTH, Screen.width - 24f);
+                    float maxH = Mathf.Max(STICK_GRAPH_MIN_HEIGHT, Screen.height - 24f);
+                    if ((g.resizeEdge & STICK_GRAPH_EDGE_RIGHT) != 0)
+                        newW = Mathf.Clamp(g.resizeStartRect.width + dx, STICK_GRAPH_MIN_WIDTH, maxW);
+                    if ((g.resizeEdge & STICK_GRAPH_EDGE_BOTTOM) != 0)
+                        newH = Mathf.Clamp(g.resizeStartRect.height + dy, STICK_GRAPH_MIN_HEIGHT, maxH);
+                    if ((g.resizeEdge & STICK_GRAPH_EDGE_LEFT) != 0)
+                    {
+                        newW = Mathf.Clamp(g.resizeStartRect.width - dx, STICK_GRAPH_MIN_WIDTH, maxW);
+                        newX = g.resizeStartRect.x + (g.resizeStartRect.width - newW);
+                    }
+                    if ((g.resizeEdge & STICK_GRAPH_EDGE_TOP) != 0)
+                    {
+                        newH = Mathf.Clamp(g.resizeStartRect.height - dy, STICK_GRAPH_MIN_HEIGHT, maxH);
+                        newY = g.resizeStartRect.y + (g.resizeStartRect.height - newH);
+                    }
+                    g.rect = new Rect(newX, newY, newW, newH);
+                    EnsureStickGraphRect(g, false);
+                    e.Use();
+                }
+                if (g.resizing && e.type == EventType.MouseUp && e.button == 0)
+                {
+                    g.resizing = false;
+                    g.resizeEdge = 0;
+                    e.Use();
+                }
+
+                bool inDropdownList = false;
+                if (g.channelDropdown)
+                {
+                    for (int i = 0; i < stickGraphChannelNames.Length; i++)
+                    {
+                        if (GetStickGraphOptionRect(ddBtn, i).Contains(e.mousePosition))
+                        {
+                            inDropdownList = true;
+                            break;
+                        }
+                    }
+                }
+                if (e.type == EventType.MouseDown && e.button == 0 && panel.Contains(e.mousePosition) &&
+                    !close.Contains(e.mousePosition) && !pin.Contains(e.mousePosition) && !ddBtn.Contains(e.mousePosition) &&
+                    !inDropdownList && g.edgeHover == 0)
+                {
+                    g.dragCandidate = true;
+                    g.dragOffset = e.mousePosition - new Vector2(panel.x, panel.y);
+                }
+                if (g.dragging && e.type == EventType.MouseDrag && e.button == 0)
+                {
+                    g.rect.x = e.mousePosition.x - g.dragOffset.x;
+                    g.rect.y = e.mousePosition.y - g.dragOffset.y;
+                    EnsureStickGraphRect(g, false);
+                    e.Use();
+                }
+                if (g.dragging && e.type == EventType.MouseUp && e.button == 0)
+                {
+                    g.dragging = false;
+                    e.Use();
+                }
+
+                GUI.color = ThemeLabel(alpha);
+                string pilotLabel = string.IsNullOrEmpty(g.pilot.pilotName) ? "Pilot" : g.pilot.pilotName;
+                float titleAvailW = titleRect.width;
+                if (g.cachedTitle == null || g.cachedTitleWidth != titleAvailW || g.cachedPilotName != pilotLabel)
+                {
+                    string titleText = "Stick Graph - " + pilotLabel;
+                    if (settingsHeaderStyle.CalcSize(new GUIContent(titleText)).x > titleAvailW)
+                    {
+                        string trimmed = titleText;
+                        while (trimmed.Length > 0 && settingsHeaderStyle.CalcSize(new GUIContent(trimmed + "...")).x > titleAvailW)
+                            trimmed = trimmed.Substring(0, trimmed.Length - 1);
+                        titleText = trimmed + "...";
+                    }
+                    g.cachedTitle = titleText;
+                    g.cachedTitleWidth = titleAvailW;
+                    g.cachedPilotName = pilotLabel;
+                }
+                GUI.Label(titleRect, g.cachedTitle, settingsHeaderStyle);
+                if (DrawStyledToggleButton(pin, iconPin, g.pinned, alpha))
+                    g.pinned = !g.pinned;
+                GUI.color = ThemeCloseLabel(alpha);
+                GUI.Label(close, "x", settingsHeaderStyle);
+                if (e.type == EventType.MouseUp && e.button == 0 && close.Contains(e.mousePosition))
+                {
+                    stickGraphs.RemoveAt(gi);
+                    gi--;
+                    e.Use();
+                    GUI.color = old;
+                    continue;
+                }
+
+                float[] times = g.pilot.stateTimes;
+                float lastStateTime = times[times.Length - 1];
+                float lapStart = Mathf.Clamp(GetGateTimestamp(g.pilot), times[0], lastStateTime);
+                float lapEnd = lastStateTime;
+                float lapDuration = Mathf.Max(lapEnd - lapStart, 0.001f);
+
+                float yLblW = 46f;
+                float timeLblH = 16f;
+                Rect plot = new Rect(
+                    panel.x + 8f + yLblW,
+                    panel.y + titleH + 6f,
+                    panel.width - 8f - 6f - yLblW,
+                    panel.height - titleH - 6f - 4f - timeLblH);
+                Rect timeLblRow = new Rect(plot.x, plot.yMax + 2f, plot.width, timeLblH);
+
+                GUI.color = darkMode
+                    ? new Color(0.08f, 0.08f, 0.09f, 0.8f * alpha)
+                    : new Color(0.94f, 0.94f, 0.94f, 0.8f * alpha);
+                GUI.DrawTexture(plot, whiteTex);
+                GUI.color = ThemePanelBorder(alpha);
+                GUI.DrawTexture(new Rect(plot.x, plot.y, plot.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(plot.x, plot.yMax - 1f, plot.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(plot.x, plot.y, 1f, plot.height), whiteTex);
+                GUI.DrawTexture(new Rect(plot.xMax - 1f, plot.y, 1f, plot.height), whiteTex);
+
+                bool throttleAxis = g.channel == 0;
+                for (int i = 0; i < 5; i++)
+                {
+                    float yv = plot.y + plot.height * (i / 4f);
+                    GUI.color = i == 2 ? ThemePanelBorder(alpha) : ThemeTrack(alpha);
+                    GUI.DrawTexture(new Rect(plot.x, yv, plot.width, 1f), whiteTex);
+                    string labelText;
+                    if (throttleAxis)
+                        labelText = (100 - i * 25).ToString("0") + "%";
+                    else
+                    {
+                        int labelVal = 100 - i * 50;
+                        labelText = (labelVal > 0 ? "+" : "") + labelVal + "%";
+                    }
+                    float labelY = yv - 8f;
+                    labelY = Mathf.Clamp(labelY, panel.y + 2f, panel.y + panel.height - 18f);
+                    GUI.color = ThemeDimLabel(alpha);
+                    GUI.Label(new Rect(plot.x - yLblW + 2f, labelY, yLblW - 6f, 16f), labelText, settingsAxisLabelStyle);
+                }
+
+                Color signalColor = Color.Lerp(g.pilot.color, new Color(1f, 1f, 1f), 0.25f);
+                GUI.color = new Color(signalColor.r, signalColor.g, signalColor.b, alpha);
+                int plotW = Mathf.Max(1, (int)plot.width);
+                float prevY = plot.y + plot.height * (1f - (SampleStickChannel(g.pilot, lapStart, g.channel) + 1f) * 0.5f);
+                for (int i = 0; i < plotW; i++)
+                {
+                    float f = (i + 1) / (float)plotW;
+                    float stateTime = lapStart + f * lapDuration;
+                    float value = SampleStickChannel(g.pilot, stateTime, g.channel);
+                    float curY = plot.y + plot.height * (1f - (value + 1f) * 0.5f);
+                    float top = Mathf.Min(prevY, curY) - 1f;
+                    float bottom = Mathf.Max(prevY, curY) + 1f;
+                    GUI.DrawTexture(new Rect(plot.x + i, top, 1f, Mathf.Max(bottom - top, 2f)), whiteTex);
+                    prevY = curY;
+                }
+
+                float replayTime;
+                if (TryGetReplayTime(out replayTime))
+                {
+                    float queryT = GetGateQueryTimestamp(g.pilot, replayTime);
+                    if (queryT >= lapStart && queryT <= lapEnd)
+                    {
+                        float playheadX = plot.x + (queryT - lapStart) / lapDuration * plot.width;
+                        GUI.color = new Color(1f, 1f, 1f, 0.85f * alpha);
+                        GUI.DrawTexture(new Rect(playheadX, plot.y, 1f, plot.height), whiteTex);
+                        GUI.color = new Color(1f, 1f, 1f, 0.4f * alpha);
+                        GUI.DrawTexture(new Rect(playheadX + 1f, plot.y, 1f, plot.height), whiteTex);
+                    }
+                }
+
+                GUI.color = ThemeDimLabel(alpha);
+                GUI.Label(new Rect(timeLblRow.x, timeLblRow.y, 60f, timeLblRow.height), "0.0s", settingsSmallStyle);
+                GUI.Label(new Rect(timeLblRow.x + timeLblRow.width * 0.5f - 30f, timeLblRow.y, 60f, timeLblRow.height),
+                    (lapDuration * 0.5f).ToString("0.0") + "s", settingsSmallCenterStyle);
+                GUI.Label(new Rect(timeLblRow.xMax - 60f, timeLblRow.y, 60f, timeLblRow.height),
+                    lapDuration.ToString("0.0") + "s", settingsSmallStyle);
+
+                int channelIndex = Mathf.Clamp(g.channel, 0, stickGraphChannelNames.Length - 1);
+                bool ddHover = ddBtn.Contains(e.mousePosition);
+                GUI.color = ddHover ? new Color(1f, 1f, 1f, 0.92f * alpha) : ThemeButtonBg(alpha);
+                GUI.DrawTexture(ddBtn, whiteTex);
+                GUI.color = ThemeButtonBorder(alpha);
+                GUI.DrawTexture(new Rect(ddBtn.x, ddBtn.y, ddBtn.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(ddBtn.x, ddBtn.yMax - 1f, ddBtn.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(ddBtn.x, ddBtn.y, 1f, ddBtn.height), whiteTex);
+                GUI.DrawTexture(new Rect(ddBtn.xMax - 1f, ddBtn.y, 1f, ddBtn.height), whiteTex);
+                GUI.color = ThemeLabel(alpha);
+                GUI.Label(new Rect(ddBtn.x + 6f, ddBtn.y, ddBtn.width - 22f, ddBtn.height), stickGraphChannelNames[channelIndex], settingsSmallStyle);
+                GUI.Label(new Rect(ddBtn.xMax - 17f, ddBtn.y, 12f, ddBtn.height), "v", settingsSmallStyle);
+                if (e.type == EventType.MouseDown && e.button == 0 && ddBtn.Contains(e.mousePosition))
+                {
+                    g.channelDropdown = !g.channelDropdown;
+                    settingsControlPressed = true;
+                    e.Use();
+                }
+
+                if (g.channelDropdown)
+                {
+                    float optH = 20f;
+                    for (int i = 0; i < stickGraphChannelNames.Length; i++)
+                    {
+                        Rect optRect = new Rect(ddBtn.x, ddBtn.yMax + 2f + optH * i, ddBtn.width, optH);
+                        bool optHover = optRect.Contains(e.mousePosition);
+                        GUI.color = i == channelIndex
+                            ? new Color(0.25f, 0.62f, 0.95f, alpha)
+                            : optHover ? new Color(1f, 1f, 1f, 0.92f * alpha) : ThemeOptionBg(alpha);
+                        GUI.DrawTexture(optRect, whiteTex);
+                        GUI.color = ThemeOptionBorder(alpha);
+                        GUI.DrawTexture(new Rect(optRect.x, optRect.y, optRect.width, 1f), whiteTex);
+                        GUI.DrawTexture(new Rect(optRect.x, optRect.yMax - 1f, optRect.width, 1f), whiteTex);
+                        GUI.color = i == channelIndex ? new Color(1f, 1f, 1f, alpha) : ThemeOptionText(alpha);
+                        GUI.Label(optRect, stickGraphChannelNames[i], settingsSmallStyle);
+                        if (e.type == EventType.MouseUp && e.button == 0 && optRect.Contains(e.mousePosition))
+                        {
+                            g.channel = i;
+                            g.channelDropdown = false;
+                            settingsControlPressed = false;
+                            e.Use();
+                        }
+                    }
+                    if (e.type == EventType.MouseDown && e.button == 0 && !ddBtn.Contains(e.mousePosition))
+                    {
+                        bool inList = false;
+                        for (int i = 0; i < stickGraphChannelNames.Length; i++)
+                        {
+                            if (GetStickGraphOptionRect(ddBtn, i).Contains(e.mousePosition))
+                            {
+                                inList = true;
+                                break;
+                            }
+                        }
+                        if (!inList)
+                            g.channelDropdown = false;
+                    }
+                }
+
+                if (e.type == EventType.MouseDown && e.button == 0 && g.dragCandidate)
+                {
+                    g.dragging = true;
+                    g.dragCandidate = false;
+                }
+                if (e.type == EventType.MouseUp && e.button == 0)
+                    settingsControlPressed = false;
+
+                GUI.color = old;
+            }
         }
 
         private void UpdateReferenceDeltaDisplay(float replayTime)
@@ -7375,6 +7936,7 @@ public class GhostLinePoller : MonoBehaviour
             currentPlaybackOverlayRectValid = false;
             currentStickCamOverlayRectValid = false;
             DrawStickCam();
+            DrawStickGraph();
             DrawBottomScrubber();
             DrawSettingsPanel();
             DrawBindingsWindow();
@@ -7431,12 +7993,24 @@ public class GhostLinePoller : MonoBehaviour
 
         private bool IsDroneLabelInteractionBlocked(Vector2 mousePosition)
         {
+            bool stickGraphBusy = false;
+            bool stickGraphHovered = false;
+            for (int i = 0; i < stickGraphs.Count; i++)
+            {
+                StickGraphState g = stickGraphs[i];
+                if (g.dragging || g.dragCandidate || g.resizing)
+                    stickGraphBusy = true;
+                if (g.rect.Contains(mousePosition))
+                    stickGraphHovered = true;
+            }
             return playbackMouseCaptured || draggingScrubber || isDraggingHandle || draggingStickCam ||
                 settingsDragging || stickSizeDragging || uiSizeDragging ||
+                stickGraphBusy ||
                 (currentPlaybackOverlayRectValid && currentPlaybackOverlayRect.Contains(mousePosition)) ||
                 (currentStickCamOverlayRectValid && currentStickCamOverlayRect.Contains(mousePosition)) ||
                 (settingsOpen && GetSettingsPanelRect().Contains(mousePosition)) ||
-                (bindingsOpen && GetBindingsWindowRect().Contains(mousePosition));
+                (bindingsOpen && GetBindingsWindowRect().Contains(mousePosition)) ||
+                stickGraphHovered;
         }
 
         private GhostLineEntry FindHoveredDroneLabel(Vector2 mousePosition)
@@ -7923,7 +8497,8 @@ private Texture2D CreateKeyboardTex(int w, int h)
             }
             mouseStillTimer += Time.deltaTime;
             bool hoveringSettings = settingsOpen && GetSettingsPanelRect().Contains(mp);
-            bool hoveringOverlay = totalRect.Contains(mp) || hoveringSettings;
+            bool hoveringStickCam = currentStickCamOverlayRectValid && currentStickCamOverlayRect.Contains(mp);
+            bool hoveringOverlay = totalRect.Contains(mp) || hoveringSettings || hoveringStickCam;
             float playbackTarget = mouseStillTimer < 0.8f ? 1f : 0f;
             if (hoveringOverlay || Time.time < replayEnterTime + 3f || playbackPinned) playbackTarget = 1f;
             fadeAmount = Mathf.Lerp(fadeAmount, playbackTarget, Time.deltaTime * 6f);
@@ -7947,6 +8522,27 @@ private Texture2D CreateKeyboardTex(int w, int h)
             else
             {
                 bindingsFadeAmount = 0f;
+            }
+
+            bool hoveringAnyGraph = false;
+            for (int i = 0; i < stickGraphs.Count; i++)
+            {
+                if (stickGraphs[i].rect.Contains(mp))
+                {
+                    hoveringAnyGraph = true;
+                    break;
+                }
+            }
+            for (int i = 0; i < stickGraphs.Count; i++)
+            {
+                StickGraphState g = stickGraphs[i];
+                if (g.pinned)
+                {
+                    g.fadeAmount = 1f;
+                    continue;
+                }
+                float stickGraphTarget = mouseStillTimer < 0.8f || hoveringOverlay || hoveringAnyGraph ? 1f : 0f;
+                g.fadeAmount = Mathf.Lerp(g.fadeAmount, stickGraphTarget, Time.deltaTime * 6f);
             }
 
             if (fadeAmount < 0.01f) return;
@@ -8203,9 +8799,13 @@ private Texture2D CreateKeyboardTex(int w, int h)
                 settingsSmallStyle.fontSize = 10;
                 settingsSmallCenterStyle = new GUIStyle(settingsSmallStyle);
                 settingsSmallCenterStyle.alignment = TextAnchor.MiddleCenter;
+                settingsAxisLabelStyle = new GUIStyle(settingsSmallCenterStyle);
+                settingsAxisLabelStyle.clipping = TextClipping.Overflow;
                 settingsHeaderStyle = new GUIStyle(settingsLabelStyle);
                 settingsHeaderStyle.fontSize = 13;
                 settingsHeaderStyle.fontStyle = FontStyle.Bold;
+                settingsHeaderStyle.wordWrap = false;
+                settingsHeaderStyle.clipping = TextClipping.Clip;
                 settingsSectionStyle = new GUIStyle(settingsLabelStyle);
                 settingsSectionStyle.fontSize = 10;
                 settingsSectionStyle.fontStyle = FontStyle.Bold;
@@ -8216,6 +8816,8 @@ private Texture2D CreateKeyboardTex(int w, int h)
                 settingsSmallStyle.normal.textColor = new Color(0.74f, 0.74f, 0.76f);
                 settingsHeaderStyle.normal.textColor = new Color(0.92f, 0.92f, 0.92f);
                 settingsSectionStyle.normal.textColor = new Color(0.6f, 0.6f, 0.62f);
+                if (settingsAxisLabelStyle != null)
+                    settingsAxisLabelStyle.normal.textColor = new Color(0.74f, 0.74f, 0.76f);
             }
             else
             {
@@ -8223,6 +8825,8 @@ private Texture2D CreateKeyboardTex(int w, int h)
                 settingsSmallStyle.normal.textColor = new Color(0.38f, 0.38f, 0.38f);
                 settingsHeaderStyle.normal.textColor = new Color(0.12f, 0.12f, 0.12f);
                 settingsSectionStyle.normal.textColor = new Color(0.25f, 0.25f, 0.25f);
+                if (settingsAxisLabelStyle != null)
+                    settingsAxisLabelStyle.normal.textColor = new Color(0.38f, 0.38f, 0.38f);
             }
         }
 
@@ -8751,11 +9355,15 @@ private Texture2D CreateKeyboardTex(int w, int h)
                     GUI.color = legendColor;
                     GUI.DrawTexture(new Rect(x + legendWidth * i / legendSteps, y, legendWidth / legendSteps + 1f, legendHeight), whiteTex);
                 }
+
                 GUI.color = ThemeDimLabel(alpha);
-                float maxKmh = GhostLinesPlugin.speedHeatmapMaxSpeedMps * 3.6f;
-                GUI.Label(new Rect(x, y + 13f, w * 0.33f, 18f), "0 km/h", settingsSmallStyle);
-                GUI.Label(new Rect(x + w * 0.33f, y + 13f, w * 0.34f, 18f), (maxKmh * 0.5f).ToString("0") + " km/h", settingsSmallCenterStyle);
-                GUI.Label(new Rect(x + w * 0.67f, y + 13f, w * 0.33f, 18f), maxKmh.ToString("0") + "+ km/h", settingsSmallStyle);
+                float minMps, maxMps;
+                GhostLinesPlugin.GetSpeedHeatmapClampRange(out minMps, out maxMps);
+                float minKmh = minMps * 3.6f;
+                float maxKmh = maxMps * 3.6f;
+                GUI.Label(new Rect(x, y + 16f, w * 0.33f, 18f), minKmh.ToString("0") + " km/h", settingsSmallStyle);
+                GUI.Label(new Rect(x + w * 0.33f, y + 16f, w * 0.34f, 18f), ((minKmh + maxKmh) * 0.5f).ToString("0") + " km/h", settingsSmallCenterStyle);
+                GUI.Label(new Rect(x + w * 0.67f, y + 16f, w * 0.33f, 18f), maxKmh.ToString("0") + "+ km/h", settingsSmallStyle);
             }
 
             if (e.type == EventType.MouseDown && e.button == 0 && settingsDragCandidate)

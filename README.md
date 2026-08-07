@@ -1,6 +1,6 @@
 # LiftoffReplayPlus
 
-Liftoff Replay Plus is an unofficial BepInEx mod for Liftoff 1.7.5 that adds playback controls, race-line visualization, delta comparison, name tags, orbit camera, freecam, rebindable control bindings, Xray, Speed Heatmap, Dark Mode, and various quality of life changes. It is not affiliated with Liftoff or its developers.
+Liftoff Replay Plus is an unofficial BepInEx mod for Liftoff 1.7.5 that adds playback controls, race-line visualization, delta comparison, name tags, orbit camera, freecam, rebindable control bindings, Xray, Speed Heatmap, Dark Mode, a stick input graph, and various quality of life changes. It is not affiliated with Liftoff or its developers.
 
 A massive thank you to <span style="color: purple;">H.K.</span> for helping bug test during development.
 
@@ -86,6 +86,19 @@ Color the race lines by speed, so a glance shows exactly where each pilot braked
 
 <p align="center">
   <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/SpeedHeatmap.png" alt="Speed heatmap overlay" width="620">
+</p>
+
+### Stick Graph
+
+Double-click the Stick Cam overlay to open the Stick Graph for the spectated pilot - a full-lap chart of the stick inputs that pilot recorded. It is great for studying how a lap was flown, for example checking whether a time loss came from slow throttle or a pitch error.
+
+- **Channels** - switch between Throttle, Yaw, Roll, and Pitch from the dropdown in the graph's title bar.
+- **Multiple graphs** - every pilot can have their own graph open at the same time; double-clicking the same pilot's stick cam brings their graph back to the front.
+- **Playhead** - a white cursor shows exactly where the current replay time is within the lap.
+- **Draggable and resizable** - grab anywhere on the graph to move it, or drag its edges and corners to resize it. Use the pin button to keep it from fading out when the mouse is idle.
+
+<p align="center">
+  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/Stickgraph.gif" alt="Stick graph showing stick inputs" width="420">
 </p>
 
 ## Replay Controls
