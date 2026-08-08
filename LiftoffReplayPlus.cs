@@ -16,7 +16,7 @@ namespace LiftoffGhostLines
     {
         public const string PluginGuid = "com.dapa.liftoff.replayplus";
         public const string PluginName = "Liftoff Replay Plus";
-        public const string PluginVersion = "1.2.1";
+        public const string PluginVersion = "1.3.0";
 
         public static List<GhostLineEntry> entries = new List<GhostLineEntry>();
         private static List<GhostLineEntry> recordingCandidates = new List<GhostLineEntry>();
@@ -55,7 +55,7 @@ namespace LiftoffGhostLines
         private static readonly string[] BindingIds =
         {
             "playpause", "restart", "xray", "smooth", "rewind", "ff", "nametags",
-            "alllines", "linesthrough", "delta", "heatmap", "loop", "holdzoom",
+            "alllines", "linesthrough", "delta", "heatmap", "loop", "graph", "holdzoom",
             "camreset", "freecamforward", "freecamback", "freecamleft", "freecamright"
         };
 
@@ -75,6 +75,7 @@ namespace LiftoffGhostLines
                 case "delta": return "Toggle Delta Display";
                 case "heatmap": return "Toggle Speed Heatmap";
                 case "loop": return "Toggle Loop Replay";
+                case "graph": return "Toggle Stick Graph";
                 case "holdzoom": return "Toggle Zoom Focus";
                 case "camreset": return "Reset Camera";
                 case "freecamforward": return "Freecam Forward";
@@ -101,6 +102,7 @@ namespace LiftoffGhostLines
                 case "delta": return KeyCode.M;
                 case "heatmap": return KeyCode.H;
                 case "loop": return KeyCode.Slash;
+                case "graph": return KeyCode.G;
                 case "holdzoom": return KeyCode.Z;
                 case "camreset": return KeyCode.V;
                 case "freecamforward": return KeyCode.W;
@@ -1863,11 +1865,18 @@ public class GhostLinePoller : MonoBehaviour
         private Texture2D iconRewind;
         private Texture2D iconFF;
         private Texture2D iconLoop;
+        private Texture2D iconTrim;
         private Texture2D iconSettings;
         private Texture2D iconPin;
         private Texture2D iconBindings;
         private bool iconsInitialized;
         private bool loopReplayEnabled = false;
+        private bool trimEnabled = false;
+        private float trimStart = 0f;
+        private float trimEnd = 0f;
+        private bool draggingTrimStart = false;
+        private bool draggingTrimEnd = false;
+        private bool trimResumePlayback = false;
         private Texture2D stickRingTex;
         private GUIStyle settingsLabelStyle;
         private GUIStyle settingsSmallStyle;
@@ -2616,6 +2625,12 @@ public class GhostLinePoller : MonoBehaviour
             restartRequested = false;
             restartPlaybackPending = false;
             loopReplayEnabled = false;
+            trimEnabled = false;
+            trimStart = 0f;
+            trimEnd = 0f;
+            draggingTrimStart = false;
+            draggingTrimEnd = false;
+            trimResumePlayback = false;
             pendingCameraViewRestore = false;
             pendingFreeCamViewRestore = false;
             pendingOrbitViewRestore = false;
@@ -2723,6 +2738,12 @@ public class GhostLinePoller : MonoBehaviour
             restartRequested = false;
             restartPlaybackPending = false;
             loopReplayEnabled = false;
+            trimEnabled = false;
+            trimStart = 0f;
+            trimEnd = 0f;
+            draggingTrimStart = false;
+            draggingTrimEnd = false;
+            trimResumePlayback = false;
             pendingCameraViewRestore = false;
             pendingFreeCamViewRestore = false;
             pendingOrbitViewRestore = false;
@@ -2922,6 +2943,7 @@ public class GhostLinePoller : MonoBehaviour
             DestroyTexture(ref iconRewind);
             DestroyTexture(ref iconFF);
             DestroyTexture(ref iconLoop);
+            DestroyTexture(ref iconTrim);
             DestroyTexture(ref iconSettings);
             DestroyTexture(ref iconPin);
             DestroyTexture(ref iconBindings);
@@ -4481,7 +4503,7 @@ public class GhostLinePoller : MonoBehaviour
             if (replayReady && bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame && Input.GetKeyDown(GhostLinesPlugin.GetBinding("playpause")))
                 RequestPlayButton();
 
-            if (replayReady && bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame && Input.GetKeyDown(KeyCode.G))
+            if (replayReady && bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame && Input.GetKeyDown(GhostLinesPlugin.GetBinding("graph")))
                 OpenStickGraph();
 
             if (replayControlsObj == null)
@@ -4579,11 +4601,32 @@ public class GhostLinePoller : MonoBehaviour
             }
 
             if (playbackMouseCaptured && !Input.GetMouseButton(0) &&
-                !draggingScrubber && !isDraggingHandle)
+                !draggingScrubber && !isDraggingHandle && !draggingTrimStart && !draggingTrimEnd)
             {
                 playbackMouseCaptured = false;
             }
-            if (draggingScrubber || isDraggingHandle)
+            if ((draggingTrimStart || draggingTrimEnd) && !Input.GetMouseButton(0) && !Application.isFocused)
+            {
+                draggingTrimStart = false;
+                draggingTrimEnd = false;
+                playbackMouseCaptured = false;
+                if (trimResumePlayback)
+                {
+                    if (!overridePlayback)
+                        SetNativeReplayPlaying(true);
+                    isPlaying = true;
+                }
+                trimResumePlayback = false;
+            }
+            if (isDraggingHandle && !Input.GetMouseButton(0) && !Application.isFocused)
+            {
+                isDraggingHandle = false;
+                playbackMouseCaptured = false;
+                if (resumePlaybackAfterSeek && !overridePlayback)
+                    SetNativeReplayPlaying(true);
+                resumePlaybackAfterSeek = false;
+            }
+            if (draggingScrubber || isDraggingHandle || draggingTrimStart || draggingTrimEnd)
                 CancelCameraLook();
 
             // --- Orbit input: must run EVERY frame, not behind the 1s gate ---
@@ -4939,7 +4982,7 @@ public class GhostLinePoller : MonoBehaviour
                 {
                     float restartTime = restartSpeed < 0f
                         ? GetLoopReplayEnd(GetNativeReplayMaximum(0f))
-                        : 0f;
+                        : GetPlaybackStart();
                     sliderValueProp.SetValue(sliderComponent, restartTime, null);
                 }
                 overridePlayback = restartWithOverride;
@@ -5026,7 +5069,8 @@ public class GhostLinePoller : MonoBehaviour
                 var minP = GetSliderMinValueProp();
                 float maxV = maxP != null ? (float)maxP.GetValue(sliderComponent, null) : 1f;
                 float minV = minP != null ? (float)minP.GetValue(sliderComponent, null) : 0f;
-                maxV = GetEffectiveReplayEnd(maxV);
+                maxV = GetTrimEnd(maxV);
+                minV = Mathf.Max(minV, GetPlaybackStart());
                 float next = cur + playbackSpeed * Time.deltaTime;
                 float loopEnd = GetLoopReplayEnd(maxV);
                 if (loopReplayEnabled && playbackSpeed > 0f && next >= loopEnd)
@@ -5899,6 +5943,15 @@ public class GhostLinePoller : MonoBehaviour
         private void RequestPlayButton()
         {
             frameStepPaused = false;
+            if (trimEnabled)
+            {
+                float cur;
+                if (TryGetReplayTime(out cur) && cur < GetPlaybackStart() - 0.01f)
+                {
+                    restartRequested = true;
+                    return;
+                }
+            }
             if (IsReplayFinished())
             {
                 restartRequested = true;
@@ -7216,6 +7269,21 @@ public class GhostLinePoller : MonoBehaviour
                 Rect traceDraw = new Rect(Mathf.Round(plot.x), Mathf.Round(plot.y), tw, th);
                 GUI.DrawTexture(traceDraw, g.traceTex);
 
+                if (trimEnabled)
+                {
+                    float trimQueryStart = GetGateQueryTimestamp(g.pilot, trimStart);
+                    float trimQueryEnd = GetGateQueryTimestamp(g.pilot, trimEnd);
+                    float trimX1 = plot.x + (Mathf.Max(trimQueryStart, lapStart) - lapStart) / lapDuration * plot.width;
+                    float trimX2 = plot.x + (Mathf.Min(trimQueryEnd, lapEnd) - lapStart) / lapDuration * plot.width;
+                    if (trimX2 - trimX1 > 0.5f)
+                    {
+                        GUI.color = darkMode
+                            ? new Color(1f, 0.6f, 0f, 0.18f * alpha)
+                            : new Color(1f, 0.45f, 0f, 0.30f * alpha);
+                        GUI.DrawTexture(new Rect(trimX1, plot.y, trimX2 - trimX1, plot.height), whiteTex);
+                    }
+                }
+
                 float replayTime;
                 if (TryGetReplayTime(out replayTime))
                 {
@@ -7494,10 +7562,24 @@ public class GhostLinePoller : MonoBehaviour
 
         private float GetLoopReplayEnd(float nativeMaximum)
         {
+            if (trimEnabled && trimEnd > 0f)
+                return Mathf.Min(nativeMaximum, trimEnd);
             if (spectatedEntry != null && spectatedEntry.built && spectatedEntry.finishTime > 0f &&
                 !float.IsNaN(spectatedEntry.finishTime) && !float.IsInfinity(spectatedEntry.finishTime))
                 return Mathf.Min(nativeMaximum, spectatedEntry.finishTime);
             return GetEffectiveReplayEnd(nativeMaximum);
+        }
+
+        private float GetTrimEnd(float nativeMaximum)
+        {
+            if (trimEnabled && trimEnd > 0f)
+                return Mathf.Min(nativeMaximum, trimEnd);
+            return GetEffectiveReplayEnd(nativeMaximum);
+        }
+
+        private float GetPlaybackStart()
+        {
+            return trimEnabled ? trimStart : 0f;
         }
 
         private void RequestLoopedReplayAtEnd()
@@ -7614,7 +7696,8 @@ public class GhostLinePoller : MonoBehaviour
         private void SetReplayTime(float replayTime, bool preservePlaybackSpeed = false)
         {
             float nativeMaximum = GetNativeReplayMaximum(replayTime);
-            replayTime = Mathf.Min(replayTime, GetEffectiveReplayEnd(nativeMaximum));
+            replayTime = Mathf.Min(replayTime, GetTrimEnd(nativeMaximum));
+            replayTime = Mathf.Max(replayTime, GetPlaybackStart());
             overridePlayback = false;
             if (!preservePlaybackSpeed)
                 playbackSpeed = 1f;
@@ -7845,7 +7928,7 @@ public class GhostLinePoller : MonoBehaviour
                     float cur = (float)sliderValueProp.GetValue(sliderComponent, null);
                     var maxProp = GetSliderMaxValueProp();
                     float maxV = maxProp != null ? (float)maxProp.GetValue(sliderComponent, null) : 1f;
-                    maxV = GetEffectiveReplayEnd(maxV);
+                    maxV = GetTrimEnd(maxV);
                     return cur >= maxV - 0.01f;
                 }
                 catch { }
@@ -7857,7 +7940,7 @@ public class GhostLinePoller : MonoBehaviour
                     float cur = (float)timeProp.GetValue(replayController, null);
                     var maxProp = GetControllerMaxTimeProp();
                     float maxV = maxProp != null ? (float)maxProp.GetValue(replayController, null) : 1f;
-                    maxV = GetEffectiveReplayEnd(maxV);
+                    maxV = GetTrimEnd(maxV);
                     return cur >= maxV - 0.01f;
                 }
                 catch { }
@@ -7872,7 +7955,7 @@ public class GhostLinePoller : MonoBehaviour
                 return;
 
             float nativeMaximum = GetNativeReplayMaximum(replayTime);
-            float replayEnd = GetEffectiveReplayEnd(nativeMaximum);
+            float replayEnd = GetTrimEnd(nativeMaximum);
             if (replayEnd <= 0f || replayEnd >= nativeMaximum - 0.01f || replayTime < replayEnd - 0.01f)
                 return;
 
@@ -8570,6 +8653,30 @@ public class GhostLinePoller : MonoBehaviour
             return tex;
         }
 
+        private Texture2D CreateTrimTex(int w, int h)
+        {
+            Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            tex.filterMode = FilterMode.Bilinear;
+            tex.wrapMode = TextureWrapMode.Clamp;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    float nx = (x + 0.5f) / w;
+                    float ny = (y + 0.5f) / h;
+                    bool leftBar = nx > 0.14f && nx < 0.26f;
+                    bool rightBar = nx > 0.74f && nx < 0.86f;
+                    bool topCap = ny > 0.16f && ny < 0.30f &&
+                        ((nx > 0.10f && nx < 0.30f) || (nx > 0.70f && nx < 0.90f));
+                    bool bottomCap = ny > 0.70f && ny < 0.84f &&
+                        ((nx > 0.10f && nx < 0.30f) || (nx > 0.70f && nx < 0.90f));
+                    tex.SetPixel(x, y, leftBar || rightBar || topCap || bottomCap ? Color.white : Color.clear);
+                }
+            }
+            tex.Apply(false);
+            return tex;
+        }
+
         private Texture2D CreateGearTex(int w, int h)
         {
             Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, true);
@@ -8654,6 +8761,7 @@ private Texture2D CreateKeyboardTex(int w, int h)
             iconRewind = CreateDoubleTriangleTex(22, 14, true);
             iconFF = CreateDoubleTriangleTex(22, 14, false);
             iconLoop = CreateLoopTex(64);
+            iconTrim = CreateTrimTex(14, 14);
             iconSettings = CreateGearTex(64, 64);
             iconPin = CreatePinTex(14, 14);
             iconBindings = CreateKeyboardTex(64, 64);
@@ -8818,7 +8926,46 @@ private Texture2D CreateKeyboardTex(int w, int h)
                     break;
                 }
             }
-            bool hoveringOverlay = totalRect.Contains(mp) || hoveringSettings || hoveringStickCam || hoveringAnyGraph;
+            float labelW = Mathf.Max(55f * s, 54f);
+            float labelInset = Mathf.Max(6f * s, 6f);
+            float row1Y = barY + Mathf.Max(2f * s, 2f);
+            Rect sliderRect = new Rect(
+                barX + labelW + labelInset,
+                row1Y,
+                barW - labelW * 2f - labelInset * 2f,
+                Mathf.Max(18f * s, 18f));
+            Rect trimStartRect = new Rect();
+            Rect trimEndRect = new Rect();
+            float tsN = 0f;
+            float teN = 0f;
+            if (trimEnabled)
+            {
+                float thandleW = 12f * s;
+                float ttX = sliderRect.x + thandleW * 0.5f;
+                float ttW = sliderRect.width - thandleW;
+                float trange = Mathf.Max(max - min, 0.0001f);
+                tsN = Mathf.Clamp01((trimStart - min) / trange);
+                teN = Mathf.Clamp01((trimEnd - min) / trange);
+                float tsX = ttX + tsN * ttW;
+                float teX = ttX + teN * ttW;
+                float poleW = 8f * s;
+                float poleH = 20f * s;
+                float poleTop = sliderRect.y + (sliderRect.height - poleH) * 0.5f;
+                float flagW = 14f * s;
+                float flagOverlap = 4f * s;
+                float flagTop = barY - 13f * s;
+                float flagH = (poleTop - flagTop) + flagOverlap;
+                float hitPad = 2f * s;
+                float sMinX = tsX - flagW - hitPad;
+                float sMaxX = tsX + hitPad;
+                float eMinX = teX - hitPad;
+                float eMaxX = teX + flagW + hitPad;
+                float hitY = flagTop - hitPad;
+                float hitH = (poleTop + poleH) - flagTop + hitPad * 2f;
+                trimStartRect = new Rect(sMinX, hitY, sMaxX - sMinX, hitH);
+                trimEndRect = new Rect(eMinX, hitY, eMaxX - eMinX, hitH);
+            }
+            bool hoveringOverlay = totalRect.Contains(mp) || trimStartRect.Contains(mp) || trimEndRect.Contains(mp) || hoveringSettings || hoveringStickCam || hoveringAnyGraph;
             float playbackTarget = mouseStillTimer < 0.8f ? 1f : 0f;
             if (hoveringOverlay || Time.time < replayEnterTime + 3f || playbackPinned) playbackTarget = 1f;
             fadeAmount = Mathf.Lerp(fadeAmount, playbackTarget, Time.deltaTime * 6f);
@@ -8859,25 +9006,18 @@ private Texture2D CreateKeyboardTex(int w, int h)
             if (fadeAmount < 0.01f) return;
 
             EnsurePlaybackTimeStyles(s);
-            float labelW = Mathf.Max(55f * s, 54f);
-            float labelInset = Mathf.Max(6f * s, 6f);
             float labelH = Mathf.Max(18f * s, 18f);
             float btnW = 34f * s;
             float btnH = 24f * s;
-            float row1Y = barY + Mathf.Max(2f * s, 2f);
             float row2Y = barY + 28f * s;
 
-            Rect sliderRect = new Rect(
-                barX + labelW + labelInset,
-                row1Y,
-                barW - labelW * 2f - labelInset * 2f,
-                Mathf.Max(18f * s, 18f));
             Rect btnPlayRect = new Rect(barX + 5f * s, row2Y, btnW, btnH);
             Rect btnRewindRect = new Rect(barX + 5f * s + btnW + 4f * s, row2Y, btnW, btnH);
             Rect btnFFRect = new Rect(barX + 5f * s + (btnW + 4f * s) * 2f, row2Y, btnW, btnH);
             float speedW = Mathf.Max(34f * s, 32f);
             Rect speedRect = new Rect(btnFFRect.xMax + 4f * s, row2Y, speedW, btnH);
             Rect btnLoopRect = new Rect(speedRect.xMax + 4f * s, row2Y, btnW, btnH);
+            Rect btnTrimRect = new Rect(btnLoopRect.xMax + 4f * s, row2Y, btnW, btnH);
             float pinW = btnW;
 
             Color oldColor = GUI.color;
@@ -8910,11 +9050,23 @@ private Texture2D CreateKeyboardTex(int w, int h)
             }
             if (DrawStyledToggleButton(btnLoopRect, iconLoop, loopReplayEnabled, fadeAmount))
                 loopReplayEnabled = !loopReplayEnabled;
+            if (DrawStyledToggleButton(btnTrimRect, iconTrim, trimEnabled, fadeAmount))
+            {
+                trimEnabled = !trimEnabled;
+                if (trimEnabled && trimEnd <= 0f)
+                {
+                    float trimMax = GetNativeReplayMaximum(0f);
+                    trimStart = 0f;
+                    trimEnd = GetEffectiveReplayEnd(trimMax);
+                    if (trimEnd <= 0f)
+                        trimEnd = trimMax;
+                }
+            }
 
             GUI.color = ThemeLabel(fadeAmount);
             GUI.Label(speedRect, playbackSpeed.ToString("0.##") + "x", playbackSpeedStyle);
 
-            Rect btnSettingsRect = new Rect(btnLoopRect.xMax + 4f * s, row2Y, btnW, btnH);
+            Rect btnSettingsRect = new Rect(btnTrimRect.xMax + 4f * s, row2Y, btnW, btnH);
             if (DrawStyledButton(btnSettingsRect, iconSettings, fadeAmount))
             {
                 settingsOpen = !settingsOpen;
@@ -8941,6 +9093,8 @@ private Texture2D CreateKeyboardTex(int w, int h)
 
             bool onControl = sliderRect.Contains(mp) || btnPlayRect.Contains(mp)
                           || btnRewindRect.Contains(mp) || btnFFRect.Contains(mp) || btnLoopRect.Contains(mp)
+                          || btnTrimRect.Contains(mp)
+                          || trimStartRect.Contains(mp) || trimEndRect.Contains(mp)
                           || btnSettingsRect.Contains(mp) || btnBindingsRect.Contains(mp) || btnPinRect.Contains(mp);
             var ev = Event.current;
             if (ev.type == EventType.MouseDown && ev.button == 0 && totalRect.Contains(mp) && !onControl)
@@ -8993,13 +9147,29 @@ private Texture2D CreateKeyboardTex(int w, int h)
             GUI.color = ThemeTrack(fadeAmount);
             GUI.DrawTexture(new Rect(tX, tY, tW, trackH), whiteTex);
 
-            if (normV > 0.001f)
+            float fillStartN = 0f;
+            float fillEndN = normV;
+            if (trimEnabled)
+            {
+                GUI.color = new Color(1f, 0.6f, 0f, 0.12f * fadeAmount);
+                GUI.DrawTexture(new Rect(tX + tsN * tW, tY, (teN - tsN) * tW, trackH), whiteTex);
+                fillStartN = tsN;
+                fillEndN = Mathf.Clamp(normV, tsN, teN);
+            }
+
+            if (fillEndN - fillStartN > 0.001f)
             {
                 GUI.color = new Color(0.25f, 0.62f, 0.95f, fadeAmount);
-                GUI.DrawTexture(new Rect(tX, tY, normV * tW, trackH), whiteTex);
+                GUI.DrawTexture(new Rect(tX + fillStartN * tW, tY, (fillEndN - fillStartN) * tW, trackH), whiteTex);
             }
 
             float handleX = tX + normV * tW;
+            if (trimEnabled)
+            {
+                float tsX = tX + tsN * tW;
+                float teX = tX + teN * tW;
+                handleX = Mathf.Clamp(handleX, tsX + handleW * 0.5f, teX - handleW * 0.5f);
+            }
             Rect handleRect = new Rect(handleX - handleW / 2f, sliderRect.y + (sliderRect.height - handleH) / 2f, handleW, handleH);
             Event ce = Event.current;
             bool hHit = new Rect(handleRect.x - 4, handleRect.y - 4, handleRect.width + 8, handleRect.height + 8).Contains(ce.mousePosition);
@@ -9014,18 +9184,31 @@ private Texture2D CreateKeyboardTex(int w, int h)
             GUI.DrawTexture(new Rect(handleRect.x, handleRect.y, hb, handleRect.height), whiteTex);
             GUI.DrawTexture(new Rect(handleRect.xMax - hb, handleRect.y, hb, handleRect.height), whiteTex);
 
-            if (ce.type == EventType.MouseDown && ce.button == 0 && (hHit || tHit) && !isDraggingHandle)
+            if (ce.type == EventType.MouseDown && ce.button == 0 && (hHit || tHit) && !isDraggingHandle
+                && !trimStartRect.Contains(ce.mousePosition) && !trimEndRect.Contains(ce.mousePosition))
             {
+                float nn = Mathf.Clamp01((ce.mousePosition.x - tX) / tW);
+                bool allowSeek = true;
+                if (trimEnabled)
+                {
+                    if (nn < tsN || nn > teN)
+                        allowSeek = false;
+                }
+                if (!allowSeek)
+                {
+                    ce.Use();
+                    goto skipHandleDrag;
+                }
                 isDraggingHandle = true;
                 playbackMouseCaptured = true;
                 isOrbiting = false;
                 CancelCameraLook();
                 resumePlaybackAfterSeek = overridePlayback ? isPlaying : IsNativeReplayPlaying();
-                float nn = Mathf.Clamp01((ce.mousePosition.x - tX) / tW);
                 float nv = min + nn * range;
                 SeekReplayTimeKeepingPlayback(nv);
                 ce.Use();
             }
+        skipHandleDrag:
             if (isDraggingHandle)
             {
                 if (ce.type == EventType.MouseUp && ce.button == 0)
@@ -9040,11 +9223,120 @@ private Texture2D CreateKeyboardTex(int w, int h)
                 else if (ce.type == EventType.MouseDrag && ce.button == 0)
                 {
                     float nn = Mathf.Clamp01((ce.mousePosition.x - tX) / tW);
-                    float nv = min + nn * range;
-                    SeekReplayTimeKeepingPlayback(nv);
+                    bool allowSeek = true;
+                    if (trimEnabled)
+                    {
+                        if (nn < tsN || nn > teN)
+                            allowSeek = false;
+                    }
+                    if (allowSeek)
+                    {
+                        float nv = min + nn * range;
+                        SeekReplayTimeKeepingPlayback(nv);
+                    }
                     ce.Use();
                 }
             }
+
+            if (trimEnabled)
+            {
+                Color trimColor = new Color(1f, 0.6f, 0f, 0.95f * fadeAmount);
+                Color trimHover = new Color(1f, 0.75f, 0.25f, fadeAmount);
+                bool startHit = trimStartRect.Contains(ce.mousePosition);
+                bool endHit = trimEndRect.Contains(ce.mousePosition);
+
+                float tsX = tX + tsN * tW;
+                float teX = tX + teN * tW;
+                float poleW = 8f * s;
+                float poleH = 20f * s;
+                float poleY = sliderRect.y + (sliderRect.height - poleH) * 0.5f;
+                float flagW = 14f * s;
+                float flagOverlap = 4f * s;
+                float flagTop = barY - 13f * s;
+                float flagH = (poleY - flagTop) + flagOverlap;
+                Rect startPole = new Rect(tsX - poleW, poleY, poleW, poleH);
+                Rect startFlag = new Rect(tsX - flagW, flagTop, flagW, flagH);
+                Rect endPole = new Rect(teX, poleY, poleW, poleH);
+                Rect endFlag = new Rect(teX, flagTop, flagW, flagH);
+
+                GUI.color = (startHit || draggingTrimStart) ? trimHover : trimColor;
+                GUI.DrawTexture(startPole, whiteTex);
+                GUI.color = (endHit || draggingTrimEnd) ? trimHover : trimColor;
+                GUI.DrawTexture(endPole, whiteTex);
+
+                GUI.color = new Color(0.2f, 0.12f, 0f, 0.9f * fadeAmount);
+                float tb = 1f;
+                GUI.DrawTexture(new Rect(startPole.x, startPole.yMax - tb, startPole.width, tb), whiteTex);
+                GUI.DrawTexture(new Rect(startPole.x, startPole.y, tb, startPole.height), whiteTex);
+                GUI.DrawTexture(new Rect(startPole.xMax - tb, startPole.y, tb, startPole.height), whiteTex);
+                GUI.DrawTexture(new Rect(endPole.x, endPole.yMax - tb, endPole.width, tb), whiteTex);
+                GUI.DrawTexture(new Rect(endPole.x, endPole.y, tb, endPole.height), whiteTex);
+                GUI.DrawTexture(new Rect(endPole.xMax - tb, endPole.y, tb, endPole.height), whiteTex);
+
+                GUI.color = (startHit || draggingTrimStart) ? trimHover : trimColor;
+                GUI.DrawTexture(startFlag, whiteTex);
+                GUI.color = (endHit || draggingTrimEnd) ? trimHover : trimColor;
+                GUI.DrawTexture(endFlag, whiteTex);
+
+                GUI.color = new Color(0.2f, 0.12f, 0f, 0.9f * fadeAmount);
+                GUI.DrawTexture(new Rect(startFlag.x, startFlag.y, startFlag.width, tb), whiteTex);
+                GUI.DrawTexture(new Rect(startFlag.x, startFlag.y, tb, startFlag.height), whiteTex);
+                GUI.DrawTexture(new Rect(startFlag.xMax - tb, startFlag.y, tb, startFlag.height), whiteTex);
+                GUI.DrawTexture(new Rect(endFlag.x, endFlag.y, endFlag.width, tb), whiteTex);
+                GUI.DrawTexture(new Rect(endFlag.x, endFlag.y, tb, endFlag.height), whiteTex);
+                GUI.DrawTexture(new Rect(endFlag.xMax - tb, endFlag.y, tb, endFlag.height), whiteTex);
+
+                if (ce.type == EventType.MouseDown && ce.button == 0 && (startHit || endHit)
+                    && !isDraggingHandle && !draggingScrubber)
+                {
+                    draggingTrimStart = startHit;
+                    draggingTrimEnd = endHit;
+                    playbackMouseCaptured = true;
+                    trimResumePlayback = overridePlayback ? isPlaying : IsNativeReplayPlaying();
+                    SetNativeReplayPlaying(false);
+                    isPlaying = false;
+                    float nv = min + Mathf.Clamp01((ce.mousePosition.x - tX) / tW) * range;
+                    const float minGap = 0.1f;
+                    if (draggingTrimStart)
+                        trimStart = Mathf.Clamp(nv, min, trimEnd - minGap);
+                    else
+                        trimEnd = Mathf.Clamp(nv, trimStart + minGap, max);
+                    resumePlaybackAfterSeek = false;
+                    SeekReplayTimeKeepingPlayback(draggingTrimStart ? trimStart : trimEnd);
+                    ce.Use();
+                }
+                else if (draggingTrimStart || draggingTrimEnd)
+                {
+                    if (ce.type == EventType.MouseUp && ce.button == 0)
+                    {
+                        draggingTrimStart = false;
+                        draggingTrimEnd = false;
+                        playbackMouseCaptured = false;
+                        if (trimResumePlayback)
+                        {
+                            if (!overridePlayback)
+                                SetNativeReplayPlaying(true);
+                            isPlaying = true;
+                        }
+                        trimResumePlayback = false;
+                        ce.Use();
+                    }
+                    else if (ce.type == EventType.MouseDrag && ce.button == 0)
+                    {
+                        float nn = Mathf.Clamp01((ce.mousePosition.x - tX) / tW);
+                        float nv = min + nn * range;
+                        const float minGap = 0.1f;
+                        if (draggingTrimStart)
+                            trimStart = Mathf.Clamp(nv, min, trimEnd - minGap);
+                        else
+                            trimEnd = Mathf.Clamp(nv, trimStart + minGap, max);
+                        resumePlaybackAfterSeek = false;
+                        SeekReplayTimeKeepingPlayback(draggingTrimStart ? trimStart : trimEnd);
+                        ce.Use();
+                    }
+                }
+            }
+
             GUI.color = ThemeLabel(fadeAmount);
             GUI.Label(new Rect(barX + barW - labelInset - labelW, row1Y, labelW, labelH), FormatTime(totalTime), playbackTimeRightStyle);
 

@@ -104,6 +104,17 @@ Open the Stick Graph for the spectated pilot with `G` or by double-clicking the 
   <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/InputGraph.gif" alt="Stick graph showing stick inputs" width="420">
 </p>
 
+### Replay Trim
+
+Trim the replay to focus on a specific section, for example studying one gate sequence over and over without the replay running past it. The trimmed region is highlighted orange on the slider and on the stick graphs.
+
+- **Toggle** - the trim button on the playback bar turns trimming on and off.
+- **Handles** - drag the orange flag handles on the slider to set the start and end of the trimmed region.
+
+<p align="center">
+  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/Trim.gif" alt="Trimming the replay with flag handles" width="420">
+</p>
+
 ## Camera Zoom
 
 `Z` toggles camera zoom in freecam or third-person view - the camera smoothly zooms in on the spectated drone. The zoom is distance-adaptive: the closer the drone, the stronger the zoom, so it roughly frames the drone wherever it flies.
@@ -142,7 +153,7 @@ Open the Stick Graph for the spectated pilot with `G` or by double-clicking the 
 | Right mouse button | Orbit from the native camera or look with the free camera |
 | Middle mouse button or `V` | Return to the drone camera |
 
-All keys listed above are the defaults and can be rebound in-game (except the digit keys `1`-`5`, the arrow keys, `G`, and mouse actions, which are fixed). Open the Control Bindings window from the keyboard icon on the playback bar, click the button next to any action, and press the key you want (Escape cancels); a Reset Defaults button restores the stock bindings. Changes are saved and remembered across sessions.
+All keys listed above are the defaults and can be rebound in-game (except the digit keys `1`-`5`, the arrow keys, and mouse actions, which are fixed). Open the Control Bindings window from the keyboard icon on the playback bar, click the button next to any action, and press the key you want (Escape cancels); a Reset Defaults button restores the stock bindings. Changes are saved and remembered across sessions.
 
 ## Enabling / Disabling the Mod
 
