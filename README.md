@@ -90,15 +90,30 @@ Color the race lines by speed, so a glance shows exactly where each pilot braked
 
 ### Stick Graph
 
-Double-click the Stick Cam overlay to open the Stick Graph for the spectated pilot - a full-lap chart of the stick inputs that pilot recorded. It is great for studying how a lap was flown, for example checking whether a time loss came from slow throttle or a pitch error.
+Open the Stick Graph for the spectated pilot with `G` or by double-clicking the Stick Cam overlay - a full-lap chart of the stick inputs that pilot recorded. It is great for studying how a lap was flown, for example checking whether a time loss came from slow throttle or a pitch error.
 
 - **Channels** - switch between Throttle, Yaw, Roll, and Pitch from the dropdown in the graph's title bar.
-- **Multiple graphs** - every pilot can have their own graph open at the same time; double-clicking the same pilot's stick cam brings their graph back to the front.
+- **Pilot selector** - a dropdown on the title bar switches which pilot the graph shows, without closing the window.
+- **Multiple graphs** - every pilot can have their own graph open at the same time, or multiple of axis of the same pilot.
+- **Duplicate button** (`+`) - opens a copy of the current graph so you can compare the same pilot's channels side by side.
+- **Input heatmap** (striped button) - colors the graph trace by how violently the input was moved, using the same colors as the speed heatmap.
 - **Playhead** - a white cursor shows exactly where the current replay time is within the lap.
 - **Draggable and resizable** - grab anywhere on the graph to move it, or drag its edges and corners to resize it. Use the pin button to keep it from fading out when the mouse is idle.
 
 <p align="center">
-  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/Stickgraph.gif" alt="Stick graph showing stick inputs" width="420">
+  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/InputGraph.gif" alt="Stick graph showing stick inputs" width="420">
+</p>
+
+## Camera Zoom
+
+`Z` toggles camera zoom in freecam or third-person view - the camera smoothly zooms in on the spectated drone. The zoom is distance-adaptive: the closer the drone, the stronger the zoom, so it roughly frames the drone wherever it flies.
+
+- **Scroll wheel** while zoomed zooms further in or out, down to 2° FOV for close inspection.
+- Name tags, deltas, the vertical line, and the camera all track the same smoothed drone position, so nothing jitters or lags during zoom.
+- Press `Z` again to zoom back out.
+
+<p align="center">
+  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/Zoom.gif" alt="Camera zoom on the spectated drone" width="420">
 </p>
 
 ## Replay Controls
@@ -120,13 +135,14 @@ Double-click the Stick Cam overlay to open the Stick Graph for the spectated pil
 | `/` | Toggle replay loop |
 | `W`, `A`, `S`, `D` | Move/Enter free camera once active |
 | `Shift` | Move the free camera faster |
-| Hold `Z` | Temporary camera zoom |
+| `Z` | Toggle camera zoom (scroll wheel zooms in/out further while zoomed) |
+| `G` | Open stick graph for the spectated pilot |
 | Left-click drone name | Spectate that drone while in freecam/orbit |
 | Mouse wheel | Change orbit distance |
 | Right mouse button | Orbit from the native camera or look with the free camera |
 | Middle mouse button or `V` | Return to the drone camera |
 
-All keys listed above are the defaults and can be rebound in-game. Open the Control Bindings window from the keyboard icon on the playback bar, click the button next to any action, and press the key you want (Escape cancels); a Reset Defaults button restores the stock bindings. Changes are saved and remembered across sessions.
+All keys listed above are the defaults and can be rebound in-game (except the digit keys `1`-`5`, the arrow keys, `G`, and mouse actions, which are fixed). Open the Control Bindings window from the keyboard icon on the playback bar, click the button next to any action, and press the key you want (Escape cancels); a Reset Defaults button restores the stock bindings. Changes are saved and remembered across sessions.
 
 ## Enabling / Disabling the Mod
 
