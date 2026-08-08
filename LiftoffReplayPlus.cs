@@ -16,7 +16,7 @@ namespace LiftoffGhostLines
     {
         public const string PluginGuid = "com.dapa.liftoff.replayplus";
         public const string PluginName = "Liftoff Replay Plus";
-        public const string PluginVersion = "1.2.0";
+        public const string PluginVersion = "1.2.1";
 
         public static List<GhostLineEntry> entries = new List<GhostLineEntry>();
         private static List<GhostLineEntry> recordingCandidates = new List<GhostLineEntry>();
@@ -1789,13 +1789,14 @@ public class GhostLinePoller : MonoBehaviour
         private const float HOLD_ZOOM_FOV_SCALE = 0.35f;
         private const float HOLD_ZOOM_MIN_FOV = 10f;
         private const float HOLD_ZOOM_EXTRA_MIN_FOV = 2f;
-        private const float HOLD_ZOOM_FOV_SPEED = 360f;
+        private const float HOLD_ZOOM_SMOOTH_TAU = 0.22f;
         private const float HOLD_ZOOM_SCROLL_STEP = 6f;
         private const float HOLD_ZOOM_SCROLL_RATIO = 1.39f;
         private bool holdZoomFovCaptured = false;
         private float holdZoomNormalFov = 60f;
         private float holdZoomFovBias = 0f;
         private float holdZoomCurrentFov = 60f;
+        private float holdZoomSmoothFov = 60f;
         private bool holdZoomActive = false;
         private float stableReplayTime = 0f;
         private float prevReplayTime = 0f;
@@ -1812,6 +1813,7 @@ public class GhostLinePoller : MonoBehaviour
         public static GhostLinePoller Instance;
         private Dictionary<GhostLineEntry, Transform> ghostDroneMap = new Dictionary<GhostLineEntry, Transform>();
         private Dictionary<GhostLineEntry, Vector3> ghostSmoothedPos = new Dictionary<GhostLineEntry, Vector3>();
+        private Dictionary<GhostLineEntry, Quaternion> ghostSmoothedRot = new Dictionary<GhostLineEntry, Quaternion>();
         private float ghostPosBlend = 0f;
         private Dictionary<GhostLineEntry, Transform> ghostCamMountMap = new Dictionary<GhostLineEntry, Transform>();
         private class GhostTrailState
@@ -2026,6 +2028,7 @@ public class GhostLinePoller : MonoBehaviour
             GhostLineEntry.entriesEpoch++;
             ghostDroneMap.Clear();
             ghostSmoothedPos.Clear();
+            ghostSmoothedRot.Clear();
             ghostCamMountMap.Clear();
             spectatedEntry = null;
             referenceEntry = null;
@@ -2760,6 +2763,7 @@ public class GhostLinePoller : MonoBehaviour
             referenceEntry = null;
             ghostDroneMap.Clear();
             ghostSmoothedPos.Clear();
+            ghostSmoothedRot.Clear();
             ghostCamMountMap.Clear();
             ghostDroneSearchTimer = 0f;
             ghostMatchAttempts = 0;
@@ -2797,6 +2801,7 @@ public class GhostLinePoller : MonoBehaviour
             {
                 holdZoomNormalFov = camera.fieldOfView;
                 holdZoomFovBias = 0f;
+                holdZoomSmoothFov = camera.fieldOfView;
                 holdZoomFovCaptured = true;
             }
             if (!holdZoomFovCaptured)
@@ -2845,13 +2850,12 @@ public class GhostLinePoller : MonoBehaviour
                     ? Mathf.Clamp(baseFov * scrollFactor, HOLD_ZOOM_EXTRA_MIN_FOV, holdZoomNormalFov)
                     : holdZoomNormalFov;
             }
-            camera.fieldOfView = Mathf.MoveTowards(
-                camera.fieldOfView,
-                targetFov,
-                HOLD_ZOOM_FOV_SPEED * Time.deltaTime);
-            holdZoomCurrentFov = camera.fieldOfView;
+            float smoothK = 1f - Mathf.Exp(-Time.deltaTime / HOLD_ZOOM_SMOOTH_TAU);
+            holdZoomSmoothFov = Mathf.Lerp(holdZoomSmoothFov, targetFov, smoothK);
+            camera.fieldOfView = holdZoomSmoothFov;
+            holdZoomCurrentFov = holdZoomSmoothFov;
 
-            if (!zoomHeld && Mathf.Abs(camera.fieldOfView - holdZoomNormalFov) < 0.01f)
+            if (!zoomHeld && Mathf.Abs(camera.fieldOfView - holdZoomNormalFov) < 0.5f)
             {
                 camera.fieldOfView = holdZoomNormalFov;
                 holdZoomFovCaptured = false;
@@ -5070,7 +5074,13 @@ public class GhostLinePoller : MonoBehaviour
                     else
                         smoothed = position;
                     ghostSmoothedPos[pair.Key] = smoothed;
-                    pair.Value.SetPositionAndRotation(smoothed, rotation);
+                    Quaternion smoothedRot;
+                    if (ghostSmoothedRot.TryGetValue(pair.Key, out smoothedRot))
+                        smoothedRot = Quaternion.Slerp(smoothedRot, rotation, ghostPosBlend);
+                    else
+                        smoothedRot = rotation;
+                    ghostSmoothedRot[pair.Key] = smoothedRot;
+                    pair.Value.SetPositionAndRotation(smoothed, smoothedRot);
                 }
             }
         }
@@ -5772,9 +5782,15 @@ public class GhostLinePoller : MonoBehaviour
             else
                 smoothedPosS = posS;
             ghostSmoothedPos[target] = smoothedPosS;
+            Quaternion smoothedRotS;
+            if (ghostSmoothedRot.TryGetValue(target, out smoothedRotS))
+                smoothedRotS = Quaternion.Slerp(smoothedRotS, rotS, ghostPosBlend);
+            else
+                smoothedRotS = rotS;
+            ghostSmoothedRot[target] = smoothedRotS;
 
             if (nativeRoot != null)
-                nativeRoot.SetPositionAndRotation(smoothedPosS, rotS);
+                nativeRoot.SetPositionAndRotation(smoothedPosS, smoothedRotS);
 
             ghostDronePos = smoothedPosS;
             ghostDronePosValid = true;
