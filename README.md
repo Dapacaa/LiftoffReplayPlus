@@ -135,7 +135,7 @@ Trim the replay to focus on a specific section, for example studying one gate se
 | `R` | Restart the current replay |
 | `X` | Toggle Xray |
 | `Space` | Play/pause replay or restart a finished replay |
-| `1` through `5` | Spectate the corresponding pilot |
+| `1` through `5` (or keypad `1`-`5`) | Spectate the corresponding pilot |
 | Left / Right arrow | Step replay backward / forward |
 | `,` / `.` | Decrease / increase playback speed |
 | `N` | Toggle name tags |
@@ -153,7 +153,7 @@ Trim the replay to focus on a specific section, for example studying one gate se
 | Right mouse button | Orbit from the native camera or look with the free camera |
 | Middle mouse button or `V` | Return to the drone camera |
 
-All keys listed above are the defaults and can be rebound in-game (except the digit keys `1`-`5`, the arrow keys, and mouse actions, which are fixed). Open the Control Bindings window from the keyboard icon on the playback bar, click the button next to any action, and press the key you want (Escape cancels); a Reset Defaults button restores the stock bindings. Changes are saved and remembered across sessions.
+All keys listed above are the defaults and can be rebound in-game (except the arrow keys and mouse actions, which are fixed). Open the Control Bindings window from the keyboard icon on the playback bar, click the button next to any action, and press the key you want (Escape cancels); a Reset Defaults button restores the stock bindings. Changes are saved and remembered across sessions.
 
 ## Enabling / Disabling the Mod
 

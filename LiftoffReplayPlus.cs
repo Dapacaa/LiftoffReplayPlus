@@ -16,7 +16,7 @@ namespace LiftoffGhostLines
     {
         public const string PluginGuid = "com.dapa.liftoff.replayplus";
         public const string PluginName = "Liftoff Replay Plus";
-        public const string PluginVersion = "1.3.0";
+        public const string PluginVersion = "1.3.1";
 
         public static List<GhostLineEntry> entries = new List<GhostLineEntry>();
         private static List<GhostLineEntry> recordingCandidates = new List<GhostLineEntry>();
@@ -56,7 +56,8 @@ namespace LiftoffGhostLines
         {
             "playpause", "restart", "xray", "smooth", "rewind", "ff", "nametags",
             "alllines", "linesthrough", "delta", "heatmap", "loop", "graph", "holdzoom",
-            "camreset", "freecamforward", "freecamback", "freecamleft", "freecamright"
+            "camreset", "freecamforward", "freecamback", "freecamleft", "freecamright",
+            "specpilot1", "specpilot2", "specpilot3", "specpilot4", "specpilot5"
         };
 
         private static string BindingLabel(string id)
@@ -82,6 +83,11 @@ namespace LiftoffGhostLines
                 case "freecamback": return "Freecam Back";
                 case "freecamleft": return "Freecam Left";
                 case "freecamright": return "Freecam Right";
+                case "specpilot1": return "Spectate Pilot 1";
+                case "specpilot2": return "Spectate Pilot 2";
+                case "specpilot3": return "Spectate Pilot 3";
+                case "specpilot4": return "Spectate Pilot 4";
+                case "specpilot5": return "Spectate Pilot 5";
                 default: return id;
             }
         }
@@ -109,6 +115,11 @@ namespace LiftoffGhostLines
                 case "freecamback": return KeyCode.S;
                 case "freecamleft": return KeyCode.A;
                 case "freecamright": return KeyCode.D;
+                case "specpilot1": return KeyCode.Alpha1;
+                case "specpilot2": return KeyCode.Alpha2;
+                case "specpilot3": return KeyCode.Alpha3;
+                case "specpilot4": return KeyCode.Alpha4;
+                case "specpilot5": return KeyCode.Alpha5;
                 default: return KeyCode.None;
             }
         }
@@ -136,7 +147,16 @@ namespace LiftoffGhostLines
 
         public static string BindingKeyName(string id)
         {
-            return GetBinding(id).ToString();
+            return FriendlyKeyName(GetBinding(id));
+        }
+
+        private static string FriendlyKeyName(KeyCode key)
+        {
+            if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9)
+                return ((char)('0' + (key - KeyCode.Alpha0))).ToString();
+            if (key >= KeyCode.Keypad0 && key <= KeyCode.Keypad9)
+                return "Numpad " + (key - KeyCode.Keypad0);
+            return key.ToString();
         }
         private bool leaderboardScenePending;
         private Scene pendingLeaderboardScene;
@@ -282,6 +302,19 @@ namespace LiftoffGhostLines
                     update,
                     prefix: new HarmonyMethod(typeof(GhostLinesPlugin), nameof(ReplayControlsUpdatePrefix)));
                 pluginLog.LogInfo("[GhostLines] Patched ReplayControls.Update for native space suppression");
+
+                System.Reflection.MethodInfo cursorRoutine = AccessTools.Method(typeof(ReplayControls), "RoutineMonitorMouseMovement");
+                if (cursorRoutine != null)
+                {
+                    harmony.Patch(
+                        cursorRoutine,
+                        prefix: new HarmonyMethod(typeof(GhostLinesPlugin), nameof(ReplayControlsCursorRoutinePrefix)));
+                    pluginLog.LogInfo("[GhostLines] Patched ReplayControls.RoutineMonitorMouseMovement for fast cursor hiding");
+                }
+                else
+                {
+                    pluginLog.LogWarning("[GhostLines] ReplayControls.RoutineMonitorMouseMovement was not found");
+                }
             }
             catch (System.Exception ex)
             {
@@ -299,6 +332,74 @@ namespace LiftoffGhostLines
                 return true;
             poller.MarkBindingCaptureFrame();
             return false;
+        }
+
+        private static bool ReplayControlsCursorRoutinePrefix(ReplayControls __instance, ref System.Collections.IEnumerator __result)
+        {
+            CanvasGroup canvasGroup = null;
+            try
+            {
+                canvasGroup = AccessTools.Field(typeof(ReplayControls), "canvasGroup").GetValue(__instance) as CanvasGroup;
+            }
+            catch (System.Exception ex)
+            {
+                pluginLog.LogWarning("[GhostLines] Could not read ReplayControls.canvasGroup: " + ex.Message);
+            }
+            __result = ReplayCursorEnforcer(canvasGroup);
+            return false;
+        }
+
+        private static System.Collections.IEnumerator ReplayCursorEnforcer(CanvasGroup canvasGroup)
+        {
+            Vector3 previousMousePosition = Input.mousePosition;
+            float timer = 0f;
+            const float timeUntilHide = 0.6f;
+            const float fadeInSpeed = 8f;
+            const float fadeOutSpeed = 1f;
+            bool isVisible = true;
+            while (true)
+            {
+                Vector3 currentMouse = Input.mousePosition;
+                bool mouseMoved = Vector3.Distance(previousMousePosition, currentMouse) > float.Epsilon ||
+                    Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1);
+                bool pluginUiNeedsCursor = poller != null && poller.CursorNeededByPlugin();
+                if (mouseMoved || pluginUiNeedsCursor)
+                {
+                    isVisible = true;
+                    timer = 0f;
+                }
+                else if (isVisible)
+                {
+                    timer += Time.unscaledDeltaTime;
+                    if (timer > timeUntilHide)
+                    {
+                        isVisible = false;
+                        timer = 0f;
+                    }
+                }
+                previousMousePosition = currentMouse;
+                if (isVisible)
+                {
+                    Cursor.visible = true;
+                    if (canvasGroup != null)
+                    {
+                        float alpha = Mathf.Clamp01(canvasGroup.alpha + Time.unscaledDeltaTime * fadeInSpeed);
+                        if (Mathf.Abs(alpha - canvasGroup.alpha) > 0.0001f)
+                            canvasGroup.alpha = alpha;
+                    }
+                }
+                else
+                {
+                    Cursor.visible = false;
+                    if (canvasGroup != null)
+                    {
+                        float alpha = Mathf.Clamp01(canvasGroup.alpha - Time.unscaledDeltaTime * fadeOutSpeed);
+                        if (Mathf.Abs(alpha - canvasGroup.alpha) > 0.0001f)
+                            canvasGroup.alpha = alpha;
+                    }
+                }
+                yield return null;
+            }
         }
 
         private static void OnLeaderboardControllerStarted(Component __instance)
@@ -1391,6 +1492,9 @@ namespace LiftoffGhostLines
         public bool replayColorResolved = false;
         public string lastShownDeltaText = "";
         public float lastDeltaShownValue = float.NaN;
+        public float[] lastDeltaRefPath;
+        public int lastDeltaRefIndex = -1;
+        public float lastDeltaReplayTime = float.NaN;
         public static int entriesEpoch;
     }
 
@@ -1432,6 +1536,12 @@ public class GhostLinePoller : MonoBehaviour
         private object lastSyncedReplayRace;
         private System.Reflection.FieldInfo replayRaceFieldInfo;
         private System.Reflection.PropertyInfo replayRacePropInfo;
+        private const string NATIVE_SPEED_MEMBER = @"""""'""""""'""""""'""""""""""'""""'""""""""'''''""'''''""'""""''""""''""""";
+        private System.Reflection.PropertyInfo nativeSpeedPropInfo;
+        private System.Reflection.FieldInfo nativeSpeedFieldInfo;
+        private UnityEngine.Transform nativePlayPauseIcon;
+        private bool nativeSpeedResolveLogged = false;
+        private bool nativeSpeedReadFailedLogged = false;
         private System.Reflection.FieldInfo trackedRootFieldInfo;
         private System.Reflection.FieldInfo trackedCameraMountFieldInfo;
         private System.Reflection.PropertyInfo sliderMinValuePropInfo;
@@ -1494,6 +1604,8 @@ public class GhostLinePoller : MonoBehaviour
         private float bindingsFadeAmount = 0f;
         private bool bindingsDragCandidate = false;
         private Vector2 bindingsDragOffset = Vector2.zero;
+        private float bindingsScroll = 0f;
+        private bool bindingsScrollDragging = false;
         private class StickGraphState
         {
             public GhostLineEntry pilot;
@@ -1513,6 +1625,8 @@ public class GhostLinePoller : MonoBehaviour
             public Vector2 resizeStartMouse;
             public Rect resizeStartRect;
             public Texture2D traceTex;
+            public Color[] tracePixels;
+            public float traceLastBuildTime;
             public int traceCachePlotW;
             public int traceCachePlotH;
             public GhostLineEntry traceCachePilot;
@@ -1610,6 +1724,8 @@ public class GhostLinePoller : MonoBehaviour
         private float orbitPitch = 0f;
         private bool isOrbiting = false;
         private bool cameraLookDragActive = false;
+
+        private bool freeCamKeyHeldPrevFrame = false;
         private bool cameraLookSampleValid = false;
         private Vector2 lastCameraLookMouse;
         private int cameraLookScreenWidth = -1;
@@ -1646,6 +1762,7 @@ public class GhostLinePoller : MonoBehaviour
         private bool startedFromFpv = false;
         private float pendingThirdPersonScroll = 0f;
         private bool freeCamActive = false;
+        private bool playheadDragCameraActive = false;
         private Component flightCamCtrl;
         private System.Reflection.PropertyInfo inThirdPersonProp;
         private System.Reflection.PropertyInfo stuntCameraRefProp;
@@ -4584,7 +4701,9 @@ public class GhostLinePoller : MonoBehaviour
                 loopReplayEnabled = !loopReplayEnabled;
             }
 
-            int pilotKey = GetPilotNumberKey();
+            int pilotKey = 0;
+            if (bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame)
+                pilotKey = GetPilotNumberKey();
             if (pilotKey > 0)
                 TrySpectatePilot(pilotKey - 1, true);
 
@@ -4715,11 +4834,23 @@ public class GhostLinePoller : MonoBehaviour
             }
 
 
-            bool requestedFreeCam = !freeCamActive && bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame && (
+            bool freeCamKeyHeld = bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame && (
+                Input.GetKey(GhostLinesPlugin.GetBinding("freecamforward")) ||
+                Input.GetKey(GhostLinesPlugin.GetBinding("freecamleft")) ||
+                Input.GetKey(GhostLinesPlugin.GetBinding("freecamback")) ||
+                Input.GetKey(GhostLinesPlugin.GetBinding("freecamright")) ||
+                Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.A) ||
+                Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D));
+
+            bool requestedFreeCam = !freeCamActive && ((
                 Input.GetKeyDown(GhostLinesPlugin.GetBinding("freecamforward")) ||
                 Input.GetKeyDown(GhostLinesPlugin.GetBinding("freecamleft")) ||
                 Input.GetKeyDown(GhostLinesPlugin.GetBinding("freecamback")) ||
-                Input.GetKeyDown(GhostLinesPlugin.GetBinding("freecamright")));
+                Input.GetKeyDown(GhostLinesPlugin.GetBinding("freecamright")) ||
+                Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.A) ||
+                Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.D)) ||
+                (freeCamKeyHeld && freeCamKeyHeldPrevFrame));
+            freeCamKeyHeldPrevFrame = freeCamKeyHeld;
 
             if (requestedFreeCam)
                 EnterFreeCam();
@@ -4849,6 +4980,8 @@ public class GhostLinePoller : MonoBehaviour
                 // Right-click held -> compute orbit delta
                 if (Input.GetMouseButton(1) && isOrbiting)
                 {
+                    if (!cameraLookDragActive)
+                        BeginCameraLookDrag();
                     Vector2 delta = ReadCameraLookDelta();
 
                     orbitYaw += delta.x * 0.3f;
@@ -4890,6 +5023,8 @@ public class GhostLinePoller : MonoBehaviour
                 }
             }
             }
+
+            HandlePlayheadDragCamera();
 
             // --- Slow polling (1/sec) for non-input tasks ---
             if (Time.time < nextCheck) return;
@@ -5062,6 +5197,8 @@ public class GhostLinePoller : MonoBehaviour
 
             EnforceNativeHudVisibility();
 
+            SyncPlaybackSpeedWithNative();
+
             if (overridePlayback && isPlaying && sliderComponent != null && sliderValueProp != null && !isDraggingHandle)
             {
                 float cur = (float)sliderValueProp.GetValue(sliderComponent, null);
@@ -5098,6 +5235,40 @@ public class GhostLinePoller : MonoBehaviour
 
             UpdateDroneMarkers();
             EnforceNativeSpectatedTextStyle();
+        }
+
+        private void SyncPlaybackSpeedWithNative()
+        {
+            if (overridePlayback)
+            {
+                SetNativeReplayPlaying(false);
+                return;
+            }
+            if (isDraggingHandle || draggingScrubber)
+                return;
+            if (nativeSpeedPropInfo == null && nativeSpeedFieldInfo == null)
+                return;
+            object race = GetReplayRace();
+            if (race == null)
+                return;
+            float native;
+            try
+            {
+                native = nativeSpeedPropInfo != null
+                    ? (float)nativeSpeedPropInfo.GetValue(race, null)
+                    : (float)nativeSpeedFieldInfo.GetValue(race);
+            }
+            catch (System.Exception ex)
+            {
+                if (!nativeSpeedReadFailedLogged)
+                {
+                    nativeSpeedReadFailedLogged = true;
+                    pluginLog.LogWarning("[GhostLines] Native playback speed read failed: " + ex.Message);
+                }
+                return;
+            }
+            if (native > 0.001f && Mathf.Abs(native - playbackSpeed) > 0.001f)
+                playbackSpeed = native;
         }
 
         private void ApplyGhostDroneTransforms(float replayTime)
@@ -5923,14 +6094,38 @@ public class GhostLinePoller : MonoBehaviour
                 cameraDumped = true;
                 DumpCameraInfo();
             }
+
+            if (nativeSpeedPropInfo == null && nativeSpeedFieldInfo == null && !nativeSpeedResolveLogged)
+            {
+                nativeSpeedResolveLogged = true;
+                object race = GetReplayRace();
+                if (race != null)
+                {
+                    var raceType = race.GetType();
+                    const System.Reflection.BindingFlags flags =
+                        System.Reflection.BindingFlags.Public |
+                        System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Instance;
+                    nativeSpeedPropInfo = raceType.GetProperty(NATIVE_SPEED_MEMBER, flags);
+                    if (nativeSpeedPropInfo == null || !nativeSpeedPropInfo.CanRead)
+                    {
+                        nativeSpeedPropInfo = null;
+                        nativeSpeedFieldInfo = raceType.GetField(NATIVE_SPEED_MEMBER, flags);
+                    }
+                    Debug.Log($"[GhostLines] Native playback speed member: prop={nativeSpeedPropInfo != null}, field={nativeSpeedFieldInfo != null}");
+                }
+            }
         }
 
         private bool IsNativeReplayPlaying()
         {
-            Transform pauseT = replayControlsObj != null
-                ? replayControlsObj.transform.Find("VLayout/Controls/btnPlay/ImgPause")
-                : null;
-            return pauseT != null && pauseT.gameObject.activeSelf;
+            if (nativePlayPauseIcon == null)
+            {
+                nativePlayPauseIcon = replayControlsObj != null
+                    ? replayControlsObj.transform.Find("VLayout/Controls/btnPlay/ImgPause")
+                    : null;
+            }
+            return nativePlayPauseIcon != null && nativePlayPauseIcon.gameObject.activeSelf;
         }
 
         private void SetNativeReplayPlaying(bool playing)
@@ -6295,6 +6490,7 @@ public class GhostLinePoller : MonoBehaviour
 
         private void ResetToDroneCamera()
         {
+            RestoreHoldZoom();
             if (pendingCameraModeRestore == 0 && lastNativeCameraMode != 0)
                 pendingCameraModeRestore = lastNativeCameraMode;
             freeCamActive = false;
@@ -6304,6 +6500,39 @@ public class GhostLinePoller : MonoBehaviour
             startedFromFpv = false;
             lastNativeCameraMode = 0;
             Debug.Log("[GhostLines] Camera reset to drone");
+        }
+
+        private void HandlePlayheadDragCamera()
+        {
+            bool keys = Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.A) ||
+                        Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D);
+            playheadDragCameraActive = (isDraggingHandle || draggingScrubber) && keys &&
+                bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame;
+            if (!playheadDragCameraActive)
+                return;
+            if (!freeCamActive)
+                EnterFreeCam();
+            if (Camera.main == null)
+                return;
+
+            Vector3 move = Vector3.zero;
+            if (Input.GetKey(KeyCode.W)) move += Vector3.forward;
+            if (Input.GetKey(KeyCode.S)) move += Vector3.back;
+            if (Input.GetKey(KeyCode.A)) move += Vector3.left;
+            if (Input.GetKey(KeyCode.D)) move += Vector3.right;
+
+            bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            float targetSpeed = shiftHeld ? FREE_CAM_SHIFT_MAX_SPEED : FREE_CAM_SPEED;
+            freeCamCurrentSpeed = Mathf.MoveTowards(
+                freeCamCurrentSpeed,
+                targetSpeed,
+                (shiftHeld ? FREE_CAM_SHIFT_ACCELERATION : FREE_CAM_SHIFT_DECELERATION) * Time.unscaledDeltaTime);
+
+            if (move.sqrMagnitude > 0.0001f)
+            {
+                Quaternion rot = Quaternion.Euler(freeCamPitch, freeCamYaw, 0f);
+                freeCamPosition += rot * move.normalized * freeCamCurrentSpeed * Time.unscaledDeltaTime;
+            }
         }
         private void HandleFreeCamInput()
         {
@@ -6318,35 +6547,40 @@ public class GhostLinePoller : MonoBehaviour
 
             bool focusHeld = holdZoomActive && spectatedEntry != null;
 
+            if (focusHeld && Input.GetMouseButtonDown(1))
+            {
+                RestoreHoldZoom();
+                focusHeld = false;
+            }
+
             if (focusHeld)
             {
                 CancelCameraLook();
             }
-            else if (Input.GetMouseButtonDown(1))
-                BeginCameraLookDrag();
-
-            if (Input.GetMouseButton(1) && !focusHeld)
+            else
             {
-                Vector2 delta = ReadCameraLookDelta();
+                if (Input.GetMouseButtonDown(1) || (Input.GetMouseButton(1) && !cameraLookDragActive))
+                    BeginCameraLookDrag();
+                if (Input.GetMouseButton(1))
+                {
+                    Vector2 delta = ReadCameraLookDelta();
 
-                freeCamYaw += delta.x * FREE_CAM_MOUSE_SENSITIVITY;
-                freeCamPitch -= delta.y * FREE_CAM_MOUSE_SENSITIVITY;
-                freeCamPitch = Mathf.Clamp(freeCamPitch, -85f, 85f);
+                    freeCamYaw += delta.x * FREE_CAM_MOUSE_SENSITIVITY;
+                    freeCamPitch -= delta.y * FREE_CAM_MOUSE_SENSITIVITY;
+                    freeCamPitch = Mathf.Clamp(freeCamPitch, -85f, 85f);
+                }
             }
 
             if (Input.GetMouseButtonUp(1))
                 CancelCameraLook();
 
-            if (focusHeld)
-                return;
-
             Vector3 move = Vector3.zero;
-            if (bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame)
+            if (bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame && !playheadDragCameraActive)
             {
-            if (Input.GetKey(GhostLinesPlugin.GetBinding("freecamforward"))) move += Vector3.forward;
-            if (Input.GetKey(GhostLinesPlugin.GetBinding("freecamback"))) move += Vector3.back;
-            if (Input.GetKey(GhostLinesPlugin.GetBinding("freecamleft"))) move += Vector3.left;
-            if (Input.GetKey(GhostLinesPlugin.GetBinding("freecamright"))) move += Vector3.right;
+            if (Input.GetKey(GhostLinesPlugin.GetBinding("freecamforward")) || Input.GetKey(KeyCode.W)) move += Vector3.forward;
+            if (Input.GetKey(GhostLinesPlugin.GetBinding("freecamback")) || Input.GetKey(KeyCode.S)) move += Vector3.back;
+            if (Input.GetKey(GhostLinesPlugin.GetBinding("freecamleft")) || Input.GetKey(KeyCode.A)) move += Vector3.left;
+            if (Input.GetKey(GhostLinesPlugin.GetBinding("freecamright")) || Input.GetKey(KeyCode.D)) move += Vector3.right;
             }
 
             bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
@@ -6354,13 +6588,24 @@ public class GhostLinePoller : MonoBehaviour
             freeCamCurrentSpeed = Mathf.MoveTowards(
                 freeCamCurrentSpeed,
                 targetSpeed,
-                (shiftHeld ? FREE_CAM_SHIFT_ACCELERATION : FREE_CAM_SHIFT_DECELERATION) * Time.deltaTime);
+                (shiftHeld ? FREE_CAM_SHIFT_ACCELERATION : FREE_CAM_SHIFT_DECELERATION) * Time.unscaledDeltaTime);
 
             if (move.sqrMagnitude > 0.0001f)
             {
                 Quaternion rot = Quaternion.Euler(freeCamPitch, freeCamYaw, 0f);
-                freeCamPosition += rot * move.normalized * freeCamCurrentSpeed * Time.deltaTime;
+                freeCamPosition += rot * move.normalized * freeCamCurrentSpeed * Time.unscaledDeltaTime;
             }
+        }
+
+        public bool CursorNeededByPlugin()
+        {
+            if (!Application.isFocused)
+                return true;
+
+            bool searchActive = leaderboardSearchInput != null && leaderboardSearchInput.gameObject.activeInHierarchy &&
+                (leaderboardSearchInput.isFocused || leaderboardSearchFocusLock);
+            return bindingListeningFor != null || searchActive ||
+                IsDroneLabelInteractionBlocked(Input.mousePosition);
         }
 
         private void UpdateDroneMarkers()
@@ -7013,6 +7258,8 @@ public class GhostLinePoller : MonoBehaviour
                 {
                     g.resizing = false;
                     g.resizeEdge = 0;
+                    g.traceCachePlotW = -1;
+                    g.traceCachePlotH = -1;
                     e.Use();
                 }
 
@@ -7197,18 +7444,22 @@ public class GhostLinePoller : MonoBehaviour
                     : Color.Lerp(g.pilot.color, new Color(0f, 0f, 0f), 0.4f);
                 int tw = Mathf.Max(1, (int)plot.width);
                 int th = Mathf.Max(1, (int)plot.height);
-                if (g.traceCachePilot != g.pilot || g.traceCacheChannel != g.channel ||
-                    g.traceCachePlotW != tw || g.traceCachePlotH != th || g.traceCacheHeatmap != g.heatmap ||
-                    g.traceCacheInputs != g.pilot.originalInputs ||
-                    g.traceCacheLapStart != lapStart || g.traceCacheLapDuration != lapDuration)
+                bool traceContentChanged = g.traceCachePilot != g.pilot || g.traceCacheChannel != g.channel ||
+                    g.traceCacheHeatmap != g.heatmap || g.traceCacheInputs != g.pilot.originalInputs ||
+                    g.traceCacheLapStart != lapStart || g.traceCacheLapDuration != lapDuration;
+                bool traceSizeChanged = g.traceCachePlotW != tw || g.traceCachePlotH != th;
+                bool traceStale = Time.unscaledTime - g.traceLastBuildTime > 0.06f;
+                if (traceContentChanged || (traceSizeChanged && traceStale))
                 {
                     if (g.traceTex != null)
                     {
                         Destroy(g.traceTex);
                         g.traceTex = null;
                     }
-                    Color[] pixels = new Color[tw * th];
-                    for (int i = 0; i < pixels.Length; i++)
+                    if (g.tracePixels == null || g.tracePixels.Length < tw * th)
+                        g.tracePixels = new Color[tw * th];
+                    Color[] pixels = g.tracePixels;
+                    for (int i = 0; i < tw * th; i++)
                         pixels[i] = Color.clear;
                     float dt = Mathf.Max(lapDuration / tw, 0.0001f);
                     float heatRef = 8f;
@@ -7254,8 +7505,9 @@ public class GhostLinePoller : MonoBehaviour
                     }
                     g.traceTex = new Texture2D(tw, th, TextureFormat.RGBA32, false);
                     g.traceTex.filterMode = FilterMode.Point;
-                    g.traceTex.SetPixels(pixels);
+                    g.traceTex.SetPixels(0, 0, tw, th, pixels, 0);
                     g.traceTex.Apply();
+                    g.traceLastBuildTime = Time.unscaledTime;
                     g.traceCachePilot = g.pilot;
                     g.traceCacheChannel = g.channel;
                     g.traceCachePlotW = tw;
@@ -7435,7 +7687,10 @@ public class GhostLinePoller : MonoBehaviour
                 return;
             }
 
-            float refDist = GetDistanceAlongPath(refEntry, replayTime);
+            float refFinishTime = refEntry.finishTime;
+            float effReplayTime = (refFinishTime > 0f && replayTime > refFinishTime) ? refFinishTime : replayTime;
+
+            float refDist = GetDistanceAlongPath(refEntry, effReplayTime);
             float refLapDist = Mathf.Max(0f, refDist - refEntry.lapStartDistance);
 
             foreach (var entry in GhostLinesPlugin.entries)
@@ -7443,11 +7698,13 @@ public class GhostLinePoller : MonoBehaviour
                 if (entry.deltaText == null) continue;
 
                 if (entry == refEntry)
-{
+                {
                     float shown = Mathf.Max(0f, replayTime);
                     if (entry.finishTime > 0f && shown > entry.finishTime)
                         shown = entry.finishTime;
-                    if (Mathf.Abs(shown - entry.lastDeltaShownValue) >= 0.0005f || entry.lastShownDeltaText == "")
+                    if (Mathf.Abs(shown - entry.lastDeltaShownValue) >= 0.0005f || entry.lastShownDeltaText == null || entry.lastShownDeltaText == ""
+                        || entry.deltaText.gameObject.activeSelf != GhostLinesPlugin.showDeltaDisplay
+                        || entry.deltaText.text != entry.lastShownDeltaText)
                     {
                         string timeText = shown.ToString("F3");
                         entry.lastDeltaShownValue = shown;
@@ -7468,26 +7725,37 @@ public class GhostLinePoller : MonoBehaviour
                 float entryLapDist = Mathf.Max(0f, entryDist - entry.lapStartDistance);
 
                 float delta;
-                if (refLapDist <= 0f || entryLapDist <= 0f)
+                if (entry.finishTime > 0f && refFinishTime > 0f && replayTime >= entry.finishTime)
+                {
+                    delta = entry.finishTime - refFinishTime;
+                }
+                else if (refLapDist <= 0f || entryLapDist <= 0f)
                 {
                     delta = 0f;
                 }
                 else
                 {
-                    float avgProgress = (refLapDist / refEntry.lapTotalDistance + entryLapDist / entry.lapTotalDistance) * 0.5f;
-                    float refTime = GetTimeAtDistance(refEntry, avgProgress * refEntry.lapTotalDistance + refEntry.lapStartDistance) - refEntry.lapStartOffset;
-                    float entryTime = GetTimeAtDistance(entry, avgProgress * entry.lapTotalDistance + entry.lapStartDistance) - entry.lapStartOffset;
-                    delta = entryTime - refTime;
+                    Vector3 entryPos;
+                    if (!TryGetDronePosition(entry, replayTime, out entryPos) ||
+                        !TryGetNearestRefPathDistance(refEntry, entry, entryPos, replayTime, out float refDistAtEntryPos))
+                    {
+                        delta = 0f;
+                    }
+                    else
+                    {
+                        float refTimeAtEntryPos = GetTimeAtDistance(refEntry, refDistAtEntryPos) - refEntry.lapStartOffset;
+                        delta = replayTime - refTimeAtEntryPos;
+                    }
                 }
 
-                if (Mathf.Abs(delta - entry.lastDeltaShownValue) < 0.0005f && entry.lastShownDeltaText != null)
+                if (Mathf.Abs(delta - entry.lastDeltaShownValue) < 0.0005f && entry.lastShownDeltaText != null
+                    && entry.deltaText.gameObject.activeSelf == GhostLinesPlugin.showDeltaDisplay
+                    && entry.deltaText.text == entry.lastShownDeltaText)
                     continue;
                 entry.lastDeltaShownValue = delta;
                 string sign = delta > 0f ? "+" : "";
                 string text = sign + delta.ToString("F3");
                 entry.lastShownDeltaText = text;
-                if (entry.guiDeltaText == text)
-                    continue;
                 Color deltaColor = delta > 0f
                     ? new Color(1f, 0.15f, 0.15f, 1f)
                     : new Color(0.2f, 1f, 0.25f, 1f);
@@ -7649,11 +7917,12 @@ public class GhostLinePoller : MonoBehaviour
 
         private int GetPilotNumberKey()
         {
-            if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) return 1;
-            if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2)) return 2;
-            if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3)) return 3;
-            if (Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4)) return 4;
-            if (Input.GetKeyDown(KeyCode.Alpha5) || Input.GetKeyDown(KeyCode.Keypad5)) return 5;
+            for (int i = 1; i <= 5; i++)
+            {
+                KeyCode bound = GhostLinesPlugin.GetBinding("specpilot" + i);
+                if (Input.GetKeyDown(bound) || Input.GetKeyDown(KeyCode.Keypad1 + i - 1))
+                    return i;
+            }
             return 0;
         }
 
@@ -8256,6 +8525,112 @@ public class GhostLinePoller : MonoBehaviour
             return times[lo] + t * (times[hi] - times[lo]) - firstT;
         }
 
+        private static bool TryGetNearestRefPathDistance(GhostLineEntry refEntry, GhostLineEntry entry, Vector3 pos, float replayTime, out float refDist)
+        {
+            refDist = 0f;
+            if (refEntry == null || entry == null || refEntry.originalPositions == null || refEntry.pathDistances == null || refEntry.stateTimes == null)
+                return false;
+            var positions = refEntry.originalPositions;
+            var dists = refEntry.pathDistances;
+            var times = refEntry.stateTimes;
+            int n = positions.Length;
+            if (n < 2 || dists.Length != n || times.Length != n)
+                return false;
+
+            int first = 0;
+            if (refEntry.lapStartDistance > 0f)
+            {
+                int lo = 0, hi = n - 1;
+                while (lo < hi)
+                {
+                    int mid = (lo + hi) / 2;
+                    if (dists[mid] < refEntry.lapStartDistance) lo = mid + 1; else hi = mid;
+                }
+                first = Mathf.Clamp(lo - 1, 0, n - 1);
+            }
+            int last = n - 1;
+            int span = last - first + 1;
+            float lapDur = Mathf.Max(0.001f, refEntry.finishTime > 0f ? refEntry.finishTime : times[last] - times[first]);
+            float statesPerSec = span / lapDur;
+
+            float lastDelta = float.IsNaN(entry.lastDeltaShownValue) ? 0f : entry.lastDeltaShownValue;
+            float expectedLapTime = replayTime - lastDelta;
+
+            bool continuous = entry.lastDeltaRefPath == refEntry.pathDistances
+                && entry.lastDeltaRefIndex >= first && entry.lastDeltaRefIndex <= last
+                && !float.IsNaN(entry.lastDeltaReplayTime)
+                && Mathf.Abs(replayTime - entry.lastDeltaReplayTime) <= 2.5f;
+
+            int center;
+            int win;
+            float tolerance;
+            if (continuous)
+            {
+                center = entry.lastDeltaRefIndex;
+                float dtReplay = Mathf.Abs(replayTime - entry.lastDeltaReplayTime);
+                win = Mathf.Max(96, (int)(statesPerSec * (dtReplay * 4f + 1.5f)));
+                tolerance = 0.05f;
+            }
+            else
+            {
+                float anchorRefDist = refEntry.lapStartDistance;
+                if (entry.pathDistances != null && entry.pathDistances.Length > 0 && entry.lapTotalDistance > 0f)
+                {
+                    float entryDistNow = GetDistanceAlongPath(entry, replayTime);
+                    anchorRefDist += Mathf.Max(0f, entryDistNow - entry.lapStartDistance);
+                }
+                int lo = first, hi = last;
+                while (lo < hi)
+                {
+                    int mid = (lo + hi) / 2;
+                    if (dists[mid] < anchorRefDist) lo = mid + 1; else hi = mid;
+                }
+                center = Mathf.Clamp(lo, first, last);
+                win = Mathf.Max(96, span / 8 + (int)(Mathf.Abs(lastDelta) * statesPerSec));
+                tolerance = 0.5f;
+            }
+
+            int segLo = Mathf.Max(first, center - win);
+            int segHi = Mathf.Min(last - 1, center + win);
+            if (segHi < segLo)
+                return false;
+
+            float best = float.MaxValue;
+            float bestT = 0f;
+            int bestSeg = segLo;
+            for (int i = segLo; i <= segHi; i++)
+            {
+                Vector3 a = positions[i];
+                Vector3 b = positions[i + 1];
+                Vector3 ab = b - a;
+                float lenSqr = ab.sqrMagnitude;
+                float t;
+                float distSqr;
+                if (lenSqr < 1e-12f)
+                {
+                    t = 0f;
+                    distSqr = (a - pos).sqrMagnitude;
+                }
+                else
+                {
+                    t = Mathf.Clamp01(Vector3.Dot(pos - a, ab) / lenSqr);
+                    distSqr = (a + ab * t - pos).sqrMagnitude;
+                }
+                float tAbs = times[i] + t * (times[i + 1] - times[i]);
+                float lapTimeAtPoint = tAbs - times[first];
+                float temporalErr = Mathf.Max(0f, Mathf.Abs(lapTimeAtPoint - expectedLapTime) - tolerance);
+                float score = distSqr + temporalErr * temporalErr * 400f;
+                if (score < best) { best = score; bestSeg = i; bestT = t; }
+            }
+
+            entry.lastDeltaRefPath = refEntry.pathDistances;
+            entry.lastDeltaRefIndex = bestSeg;
+            entry.lastDeltaReplayTime = replayTime;
+
+            refDist = dists[bestSeg] + bestT * (dists[bestSeg + 1] - dists[bestSeg]);
+            return true;
+        }
+
         private void FindSliderReflection()
         {
             Transform sliderT = null;
@@ -8656,23 +9031,24 @@ public class GhostLinePoller : MonoBehaviour
         private Texture2D CreateTrimTex(int w, int h)
         {
             Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
-            tex.filterMode = FilterMode.Bilinear;
+            tex.filterMode = FilterMode.Point;
             tex.wrapMode = TextureWrapMode.Clamp;
+            Color32[] pixels = new Color32[w * h];
+            for (int i = 0; i < pixels.Length; i++)
+                pixels[i] = new Color32(0, 0, 0, 0);
             for (int y = 0; y < h; y++)
             {
                 for (int x = 0; x < w; x++)
                 {
-                    float nx = (x + 0.5f) / w;
-                    float ny = (y + 0.5f) / h;
-                    bool leftBar = nx > 0.14f && nx < 0.26f;
-                    bool rightBar = nx > 0.74f && nx < 0.86f;
-                    bool topCap = ny > 0.16f && ny < 0.30f &&
-                        ((nx > 0.10f && nx < 0.30f) || (nx > 0.70f && nx < 0.90f));
-                    bool bottomCap = ny > 0.70f && ny < 0.84f &&
-                        ((nx > 0.10f && nx < 0.30f) || (nx > 0.70f && nx < 0.90f));
-                    tex.SetPixel(x, y, leftBar || rightBar || topCap || bottomCap ? Color.white : Color.clear);
+                    bool topThickPart = (y >= 7 && y <= 13) &&
+                        ((x >= 0 && x <= 4) || (x >= 9 && x <= 13));
+                    bool bottomThinPart = (y >= 1 && y <= 6) &&
+                        ((x >= 3 && x <= 4) || (x >= 9 && x <= 10));
+                    if (topThickPart || bottomThinPart)
+                        pixels[y * w + x] = new Color32(255, 255, 255, 255);
                 }
             }
+            tex.SetPixels32(pixels);
             tex.Apply(false);
             return tex;
         }
@@ -8702,28 +9078,36 @@ public class GhostLinePoller : MonoBehaviour
             return tex;
         }
 
-private Texture2D CreateKeyboardTex(int w, int h)
+private Texture2D CreateKeyboardTex()
         {
-            Texture2D tex = new Texture2D(w, h);
-            tex.filterMode = FilterMode.Bilinear;
+            const int w = 20;
+            const int h = 20;
+            Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            tex.filterMode = FilterMode.Point;
             tex.wrapMode = TextureWrapMode.Clamp;
-            Color wc = Color.white;
-            Color t = Color.clear;
-            for (int y = 0; y < h; y++)
+            Color32[] pixels = new Color32[w * h];
+            const int capW = 5;
+            const int capH = 4;
+            const int gapX = 1;
+            const int gapY = 2;
+            const int startY = 5;
+            for (int row = 0; row < 2; row++)
             {
-                for (int x = 0; x < w; x++)
+                int startX = row == 0 ? 1 : 2;
+                int y0 = startY + row * (capH + gapY);
+                for (int col = 0; col < 3; col++)
                 {
-                    float nx = (x + 0.5f) / w;
-                    float ny = (y + 0.5f) / h;
-                    bool cap1 = nx > 0.18f && nx < 0.34f && ny > 0.34f && ny < 0.5f;
-                    bool cap2 = nx > 0.38f && nx < 0.54f && ny > 0.34f && ny < 0.5f;
-                    bool cap3 = nx > 0.58f && nx < 0.74f && ny > 0.34f && ny < 0.5f;
-                    bool cap4 = nx > 0.24f && nx < 0.4f && ny > 0.56f && ny < 0.72f;
-                    bool cap5 = nx > 0.44f && nx < 0.6f && ny > 0.56f && ny < 0.72f;
-                    bool cap6 = nx > 0.64f && nx < 0.76f && ny > 0.56f && ny < 0.72f;
-                    tex.SetPixel(x, y, (cap1 || cap2 || cap3 || cap4 || cap5 || cap6) ? wc : t);
+                    int x0 = startX + col * (capW + gapX);
+                    for (int y = y0; y < y0 + capH; y++)
+                    {
+                        for (int x = x0; x < x0 + capW; x++)
+                        {
+                            pixels[y * w + x] = new Color32(255, 255, 255, 255);
+                        }
+                    }
                 }
             }
+            tex.SetPixels32(pixels);
             tex.Apply();
             return tex;
         }
@@ -8764,7 +9148,7 @@ private Texture2D CreateKeyboardTex(int w, int h)
             iconTrim = CreateTrimTex(14, 14);
             iconSettings = CreateGearTex(64, 64);
             iconPin = CreatePinTex(14, 14);
-            iconBindings = CreateKeyboardTex(64, 64);
+            iconBindings = CreateKeyboardTex();
         }
 
         private bool DrawStyledButton(Rect rect, Texture2D icon, float alpha)
@@ -8795,8 +9179,10 @@ private Texture2D CreateKeyboardTex(int w, int h)
                 if (icon == iconPlay)
                     iconS *= 1.15f;
                 if (icon == iconBindings)
-                    iconS *= 1.35f;
-                Rect ir = new Rect(rect.x + (rect.width - iconS) * 0.5f, rect.y + (rect.height - iconS) * 0.5f, iconS, iconS);
+                    iconS = 20f;
+                float drawX = Mathf.Round(rect.x + (rect.width - iconS) * 0.5f);
+                float drawY = Mathf.Round(rect.y + (rect.height - iconS) * 0.5f);
+                Rect ir = new Rect(drawX, drawY, iconS, iconS);
                 GUI.color = ThemeButtonIcon(alpha);
                 GUI.DrawTexture(ir, icon);
             }
@@ -8838,7 +9224,9 @@ private Texture2D CreateKeyboardTex(int w, int h)
             if (icon != null)
             {
                 float iconS = icon == iconLoop ? 18f : 14f;
-                Rect iconRect = new Rect(rect.x + (rect.width - iconS) * 0.5f, rect.y + (rect.height - iconS) * 0.5f, iconS, iconS);
+                float drawX = Mathf.Round(rect.x + (rect.width - iconS) * 0.5f);
+                float drawY = Mathf.Round(rect.y + (rect.height - iconS) * 0.5f);
+                Rect iconRect = new Rect(drawX, drawY, iconS, iconS);
                 GUI.color = selected ? new Color(1f, 1f, 1f, alpha) : ThemeButtonIcon(alpha);
                 GUI.DrawTexture(iconRect, icon);
             }
@@ -9675,16 +10063,33 @@ private Texture2D CreateKeyboardTex(int w, int h)
 
             float x = panel.x + 14f;
             float w = panel.width - 28f;
-            float rowY = panel.y + 42f;
             float rowH = 26f;
             float btnW = 76f;
             float btnH = 20f;
             float btnX = panel.xMax - 92f;
 
-            for (int i = 0; i < GhostLinesPlugin.BindingIds.Length; i++)
+            int totalRows = GhostLinesPlugin.BindingIds.Length;
+            int visibleRows = Mathf.Max(1, Mathf.FloorToInt((panel.height - 42f - 44f) / rowH));
+            bool scrollNeeded = totalRows > visibleRows;
+            float maxScroll = Mathf.Max(0f, totalRows - visibleRows);
+            bindingsScroll = Mathf.Clamp(bindingsScroll, 0f, maxScroll);
+            float listTop = panel.y + 42f;
+            float listBottom = listTop + visibleRows * rowH;
+            float rowY = listTop - bindingsScroll * rowH;
+
+            if (scrollNeeded && e.type == EventType.ScrollWheel &&
+                new Rect(panel.x, listTop, panel.width, listBottom - listTop).Contains(e.mousePosition))
             {
-                string id = GhostLinesPlugin.BindingIds[i];
+                bindingsScroll -= Input.mouseScrollDelta.y * 3f;
+                e.Use();
+            }
+
+            for (int i = 0; i < totalRows; i++)
+            {
                 float ry = rowY + rowH * i;
+                if (ry + rowH < listTop || ry > listBottom)
+                    continue;
+                string id = GhostLinesPlugin.BindingIds[i];
                 bool listening = bindingListeningFor == id;
 
                 GUI.color = new Color(1f, 1f, 1f, 0.05f * alpha);
@@ -9712,11 +10117,36 @@ private Texture2D CreateKeyboardTex(int w, int h)
                 }
             }
 
-            Rect resetRect = new Rect(panel.x + (panel.width - 104f) / 2f, rowY + GhostLinesPlugin.BindingIds.Length * rowH + 6f, 104f, 20f);
+            Rect resetRect = new Rect(panel.x + (panel.width - 104f) / 2f, listBottom + 6f, 104f, 20f);
             if (DrawSettingsOption(resetRect, "Reset Defaults", false, alpha, TextAnchor.MiddleCenter))
             {
                 bindingListeningFor = null;
                 GhostLinesPlugin.ResetAllBindings();
+            }
+
+            if (scrollNeeded)
+            {
+                Rect track = new Rect(panel.xMax - 10f, listTop, 5f, listBottom - listTop);
+                GUI.color = new Color(1f, 1f, 1f, 0.08f * alpha);
+                GUI.DrawTexture(track, whiteTex);
+                float thumbH = Mathf.Max(18f, (listBottom - listTop) * visibleRows / totalRows);
+                float thumbY = track.y + (track.height - thumbH) * (bindingsScroll / maxScroll);
+                Rect thumb = new Rect(track.x, thumbY, 5f, thumbH);
+                GUI.color = new Color(0.7f, 0.7f, 0.75f, 0.55f * alpha);
+                GUI.DrawTexture(thumb, whiteTex);
+                if (e.type == EventType.MouseDown && e.button == 0 && thumb.Contains(e.mousePosition))
+                {
+                    bindingsScrollDragging = true;
+                    bindingsDragCandidate = false;
+                }
+                if (bindingsScrollDragging && e.type == EventType.MouseDrag && e.button == 0)
+                {
+                    float frac = Mathf.Clamp01((e.mousePosition.y - track.y) / Mathf.Max(1f, track.height - thumbH));
+                    bindingsScroll = frac * maxScroll;
+                    e.Use();
+                }
+                if (bindingsScrollDragging && e.type == EventType.MouseUp && e.button == 0)
+                    bindingsScrollDragging = false;
             }
 
             if (e.type == EventType.MouseDown && e.button == 0 && bindingsDragCandidate)
@@ -9739,7 +10169,7 @@ private Texture2D CreateKeyboardTex(int w, int h)
 
         private void EnsureBindingsWindowRect(bool initializePosition = true)
         {
-            float panelH = GetBindingsWindowHeight();
+            float panelH = Mathf.Min(GetBindingsWindowHeight(), Mathf.Max(100f, Screen.height - 24f));
             float panelW = 320f;
             if (initializePosition && (bindingsWindowRect.width < 1f || bindingsWindowRect.height < 1f))
             {
