@@ -16,7 +16,7 @@ namespace LiftoffGhostLines
     {
         public const string PluginGuid = "com.dapa.liftoff.replayplus";
         public const string PluginName = "Liftoff Replay Plus";
-        public const string PluginVersion = "1.3.1";
+        public const string PluginVersion = "1.4.0";
 
         public static List<GhostLineEntry> entries = new List<GhostLineEntry>();
         private static List<GhostLineEntry> recordingCandidates = new List<GhostLineEntry>();
@@ -41,6 +41,12 @@ namespace LiftoffGhostLines
         private static ConfigEntry<float> stickCamSizeConfig;
         private static ConfigEntry<float> playbackUiSizeConfig;
         private static ConfigEntry<bool> darkModeConfig;
+        private static ConfigEntry<bool> smoothDroneTrailsConfig;
+        private static ConfigEntry<bool> smoothingEnabledConfig;
+        private static ConfigEntry<bool> showDeltaDisplayConfig;
+        private static ConfigEntry<bool> showNameTagsConfig;
+        private static ConfigEntry<bool> linesThroughObjectsConfig;
+        private static ConfigEntry<bool> xrayEnabledConfig;
         private static ConfigEntry<bool> settingsPanelOpenConfig;
         private static ConfigEntry<bool> stickCamPositionCustomizedConfig;
         private static ConfigEntry<float> stickCamPositionXConfig;
@@ -51,13 +57,19 @@ namespace LiftoffGhostLines
         private static ConfigEntry<bool> settingsPanelPositionCustomizedConfig;
         private static ConfigEntry<float> settingsPanelPositionXConfig;
         private static ConfigEntry<float> settingsPanelPositionYConfig;
+        private static ConfigEntry<bool> pipEnabledConfig;
+        private static ConfigEntry<bool> pipRefreshAutoConfig;
+        private static ConfigEntry<int> pipRefreshHzConfig;
+        private static ConfigEntry<float> pipResolutionScaleConfig;
+        private static ConfigEntry<float> pipFarClipConfig;
         private static Dictionary<string, ConfigEntry<KeyCode>> bindingConfigs = new Dictionary<string, ConfigEntry<KeyCode>>();
         private static readonly string[] BindingIds =
         {
             "playpause", "restart", "xray", "smooth", "rewind", "ff", "nametags",
             "alllines", "linesthrough", "delta", "heatmap", "loop", "graph", "holdzoom",
             "camreset", "freecamforward", "freecamback", "freecamleft", "freecamright",
-            "specpilot1", "specpilot2", "specpilot3", "specpilot4", "specpilot5"
+            "specpilot1", "specpilot2", "specpilot3", "specpilot4", "specpilot5",
+            "pip"
         };
 
         private static string BindingLabel(string id)
@@ -88,6 +100,7 @@ namespace LiftoffGhostLines
                 case "specpilot3": return "Spectate Pilot 3";
                 case "specpilot4": return "Spectate Pilot 4";
                 case "specpilot5": return "Spectate Pilot 5";
+                case "pip": return "Toggle Picture in Picture";
                 default: return id;
             }
         }
@@ -120,6 +133,7 @@ namespace LiftoffGhostLines
                 case "specpilot3": return KeyCode.Alpha3;
                 case "specpilot4": return KeyCode.Alpha4;
                 case "specpilot5": return KeyCode.Alpha5;
+                case "pip": return KeyCode.P;
                 default: return KeyCode.None;
             }
         }
@@ -186,6 +200,18 @@ namespace LiftoffGhostLines
                 "Replay playback overlay scale. Valid range: 0.6 to 1.6.");
             darkModeConfig = Config.Bind("Preferences", "Dark Mode", false,
                 "Use the dark replay settings-panel theme.");
+            smoothDroneTrailsConfig = Config.Bind("Preferences", "Smooth Drone Trails", false,
+                "Show smooth custom trails behind replay drones.");
+            smoothingEnabledConfig = Config.Bind("Preferences", "Race Line Smoothing", true,
+                "Use smoothed race lines by default.");
+            showDeltaDisplayConfig = Config.Bind("Preferences", "Delta Display", true,
+                "Show the global delta display by default.");
+            showNameTagsConfig = Config.Bind("Preferences", "Name Tags", true,
+                "Show global drone name tags by default.");
+            linesThroughObjectsConfig = Config.Bind("Preferences", "Lines Through Objects", false,
+                "Draw race lines through track objects by default.");
+            xrayEnabledConfig = Config.Bind("Preferences", "Xray", false,
+                "Enable Xray by default during replay.");
             settingsPanelOpenConfig = Config.Bind("Preferences", "Settings Panel Open", false,
                 "Restore the replay settings panel's open or closed state.");
             stickCamPositionCustomizedConfig = Config.Bind("Preferences", "Stick Cam Position Customized", false,
@@ -206,6 +232,16 @@ namespace LiftoffGhostLines
                 "Saved settings panel horizontal position as a normalized screen coordinate.");
             settingsPanelPositionYConfig = Config.Bind("Preferences", "Settings Panel Position Y", 0.4f,
                 "Saved settings panel vertical position as a normalized screen coordinate.");
+            pipEnabledConfig = Config.Bind("Preferences", "Picture in Picture Enabled", false,
+                "Show picture-in-picture FPV windows for replay pilots during replay.");
+            pipRefreshHzConfig = Config.Bind("Preferences", "Picture in Picture Refresh Rate", 30,
+                "Picture-in-picture window refresh rate in Hz (15, 30 or 60).");
+            pipRefreshAutoConfig = Config.Bind("Preferences", "Picture in Picture Auto Refresh", true,
+                "Automatically pick the picture-in-picture refresh rate based on the number of open windows.");
+            pipResolutionScaleConfig = Config.Bind("Preferences", "Picture in Picture Resolution Scale", 0.5f,
+                "Picture-in-picture render resolution as a fraction of window size (0.25, 0.5, 0.75 or 1.0).");
+            pipFarClipConfig = Config.Bind("Preferences", "Picture in Picture Draw Distance", 100f,
+                "Picture-in-picture camera far clip distance in meters (25 to 250).");
 
             bindingConfigs.Clear();
             foreach (string id in BindingIds)
@@ -497,6 +533,43 @@ namespace LiftoffGhostLines
             playbackUiSizeConfig.Value = playbackUiSize;
             darkModeConfig.Value = darkMode;
             preferencesConfig?.Save();
+        }
+
+        private static void SaveSmoothDroneTrails(bool enabled)
+        {
+            if (smoothDroneTrailsConfig == null)
+                return;
+            smoothDroneTrailsConfig.Value = enabled;
+            preferencesConfig?.Save();
+        }
+
+        public static void SaveGlobalDisplayPreferences()
+        {
+            if (smoothingEnabledConfig == null)
+                return;
+            smoothingEnabledConfig.Value = smoothingEnabled;
+            showDeltaDisplayConfig.Value = showDeltaDisplay;
+            showNameTagsConfig.Value = showNameTags;
+            linesThroughObjectsConfig.Value = linesThroughObjects;
+            if (GhostLinePoller.Instance != null)
+                xrayEnabledConfig.Value = GhostLinePoller.Instance.IsXrayEnabled;
+            preferencesConfig?.Save();
+        }
+
+        public static void LoadGlobalDisplayPreferences(out bool smoothing, out bool delta, out bool nameTags,
+            out bool throughObjects, out bool xray)
+        {
+            smoothing = smoothingEnabledConfig == null || smoothingEnabledConfig.Value;
+            delta = showDeltaDisplayConfig == null || showDeltaDisplayConfig.Value;
+            nameTags = showNameTagsConfig == null || showNameTagsConfig.Value;
+            throughObjects = linesThroughObjectsConfig != null && linesThroughObjectsConfig.Value;
+            xray = xrayEnabledConfig != null && xrayEnabledConfig.Value;
+        }
+
+        public static void SetDeltaDisplay(bool enabled)
+        {
+            showDeltaDisplay = enabled;
+            SaveGlobalDisplayPreferences();
         }
 
         private static void SaveSettingsPanelOpen(bool open)
@@ -1134,6 +1207,7 @@ namespace LiftoffGhostLines
         public static void ToggleSmoothing()
         {
             smoothingEnabled = !smoothingEnabled;
+            SaveGlobalDisplayPreferences();
             foreach (var entry in entries)
             {
                 if (entry.built) RebuildLine(entry);
@@ -1163,6 +1237,7 @@ namespace LiftoffGhostLines
         public static void SetLinesThroughObjects(bool enabled)
         {
             linesThroughObjects = enabled;
+            SaveGlobalDisplayPreferences();
             int depthTest = enabled
                 ? (int)UnityEngine.Rendering.CompareFunction.Always
                 : (int)UnityEngine.Rendering.CompareFunction.LessEqual;
@@ -1466,6 +1541,8 @@ namespace LiftoffGhostLines
         public string pilotName;
         public Color color;
         public bool visible = true;
+        public bool xrayVisible = false;
+        public bool nameTagVisible = true;
         public GameObject lineObject;
         public Material lineMaterial;
         public GameObject markerObject;
@@ -1492,22 +1569,33 @@ namespace LiftoffGhostLines
         public bool replayColorResolved = false;
         public string lastShownDeltaText = "";
         public float lastDeltaShownValue = float.NaN;
-        public float[] lastDeltaRefPath;
-        public int lastDeltaRefIndex = -1;
+        public float lastDeltaRawValue = float.NaN;
+        public float lastDeltaUpdateTime = -1f;
         public float lastDeltaReplayTime = float.NaN;
+        public float lastRefMatchDist = float.NaN;
+        public float lastRefMatchReplayTime = float.NaN;
+        public float lastRefDistNow = float.NaN;
+        public bool deltaDisplayVisible = true;
         public static int entriesEpoch;
     }
 
 public class GhostLinePoller : MonoBehaviour
     {
         private float nextCheck = 0f;
-        private Rect settingsRect = new Rect(-1f, -1f, 304f, 360f);
+        private Rect settingsRect = new Rect(-1f, -1f, 320f, 360f);
         private bool settingsOpen = false;
         private bool settingsDragging = false;
         private bool settingsDragCandidate = false;
+        private bool pipFarSliderDragging = false;
         private bool settingsPanelPositionCustomized = false;
         private bool settingsControlPressed = false;
         private Vector2 settingsDragOffset;
+        private bool settingsDragSelecting = false;
+        private bool settingsDragSelectMoved = false;
+        private int settingsDragSelectColumn = -1;
+        private bool settingsDragSelectStartValue = false;
+        private int settingsDragSelectLastIndex = -1;
+        private readonly HashSet<int> settingsDragSelectProcessed = new HashSet<int>();
         private Texture2D whiteTex;
         private GameObject replayControlsObj;
         private CanvasGroup controlsCG;
@@ -1609,7 +1697,7 @@ public class GhostLinePoller : MonoBehaviour
         private class StickGraphState
         {
             public GhostLineEntry pilot;
-            public Rect rect = new Rect(-1f, -1f, 460f, STICK_GRAPH_MIN_HEIGHT);
+            public Rect rect = new Rect(-1f, -1f, 460f, STICK_GRAPH_DEFAULT_HEIGHT);
             public bool pinned;
             public bool dragging;
             public bool dragCandidate;
@@ -1641,7 +1729,8 @@ public class GhostLinePoller : MonoBehaviour
         private StickGraphState stickGraphActivated;
         private readonly List<GhostLineEntry> stickGraphPilotOptions = new List<GhostLineEntry>();
         private const float STICK_GRAPH_MIN_WIDTH = 320f;
-        private const float STICK_GRAPH_MIN_HEIGHT = 200f;
+        private const float STICK_GRAPH_MIN_HEIGHT = 120f;
+        private const float STICK_GRAPH_DEFAULT_HEIGHT = 200f;
         private const float STICK_GRAPH_EDGE_THICK = 6f;
         private const float STICK_GRAPH_CORNER_GRAB = 14f;
         private const int STICK_GRAPH_EDGE_RIGHT = 1;
@@ -1660,6 +1749,8 @@ public class GhostLinePoller : MonoBehaviour
         private int frameStepHeldDirection = 0;
         private float frameStepNextRepeat = 0f;
         private bool frameStepPaused = false;
+        private int pipForceRenderFrame = -1;
+        private float pipStepTargetTime = -1f;
         private const float FRAME_STEP_SECONDS = 1f / 60f;
         private const float FRAME_STEP_INITIAL_DELAY = 0.25f;
         private const float FRAME_STEP_REPEAT_INTERVAL = 1f / 30f;
@@ -1781,12 +1872,22 @@ public class GhostLinePoller : MonoBehaviour
         private bool fpvForceLogged = false;
         private bool referenceAutoInitialized = false;
         private bool xrayEnabled = false;
+        public bool IsXrayEnabled { get { return xrayEnabled; } }
         private bool darkMode = false;
         private bool stickCamEnabled = true;
+        private bool smoothDroneTrails = false;
         private float stickCamSize = 1f;
         private float playbackUiSize = 1f;
-        private bool stickSizeDragging = false;
-        private bool uiSizeDragging = false;
+        private int stickCamEdgeHover = 0;
+        private bool stickCamResizing = false;
+        private int stickCamResizeEdge = 0;
+        private float stickCamResizeStartScale = 1f;
+        private Vector2 stickCamResizeStartMouse = Vector2.zero;
+        private int playbackEdgeHover = 0;
+        private bool playbackResizing = false;
+        private int playbackResizeEdge = 0;
+        private float playbackResizeStartScale = 1f;
+        private Vector2 playbackResizeStartMouse = Vector2.zero;
         private bool xrayStructuresBuilt = false;
         private List<XrayStructure> xrayStructures = new List<XrayStructure>();
         private List<XrayStructure> xrayVisibleStructures = new List<XrayStructure>();
@@ -1813,10 +1914,22 @@ public class GhostLinePoller : MonoBehaviour
 
         public void LoadSavedPreferences()
         {
+            bool savedSmoothing;
+            bool savedDelta;
+            bool savedNameTags;
+            bool savedThroughObjects;
+            bool savedXray;
+            GhostLinesPlugin.LoadGlobalDisplayPreferences(out savedSmoothing, out savedDelta, out savedNameTags, out savedThroughObjects, out savedXray);
+            GhostLinesPlugin.smoothingEnabled = savedSmoothing;
+            GhostLinesPlugin.showDeltaDisplay = savedDelta;
+            GhostLinesPlugin.showNameTags = savedNameTags;
+            GhostLinesPlugin.linesThroughObjects = savedThroughObjects;
             stickCamEnabled = stickCamEnabledConfig.Value;
             stickCamSize = ClampSavedScale(stickCamSizeConfig.Value, 0.5f, 1.8f, 1f);
             playbackUiSize = ClampSavedScale(playbackUiSizeConfig.Value, 0.6f, 1.6f, 1f);
             darkMode = darkModeConfig.Value;
+            smoothDroneTrails = smoothDroneTrailsConfig != null && smoothDroneTrailsConfig.Value;
+            xrayEnabled = savedXray;
             savedSettingsPanelOpen = settingsPanelOpenConfig.Value;
             savedStickCamPositionCustomized = stickCamPositionCustomizedConfig.Value;
             savedStickCamPositionX = Mathf.Clamp01(ClampSavedScale(stickCamPositionXConfig.Value, 0f, 1f, 0.5f));
@@ -1830,6 +1943,14 @@ public class GhostLinePoller : MonoBehaviour
             settingsPanelPositionCustomized = savedSettingsPanelPositionCustomized;
             stickCamPositionCustomized = savedStickCamPositionCustomized;
             scrubberPositionCustomized = savedPlaybackUiPositionCustomized;
+            pipEnabled = pipEnabledConfig.Value;
+            pipRefreshAuto = pipRefreshAutoConfig.Value;
+            int savedPipHz = pipRefreshHzConfig.Value;
+            pipRefreshHz = savedPipHz == 15 || savedPipHz == 60 ? savedPipHz : 30;
+            float savedPipScale = pipResolutionScaleConfig.Value;
+            pipResolutionScale = savedPipScale == 0.25f || savedPipScale == 0.75f || savedPipScale == 1f ? savedPipScale : 0.5f;
+            float savedPipFar = pipFarClipConfig.Value;
+            pipFarClip = savedPipFar == 25f || savedPipFar == 50f || savedPipFar == 100f || savedPipFar == 150f || savedPipFar == 200f || savedPipFar == 250f ? savedPipFar : 100f;
         }
 
         private static float ClampSavedScale(float value, float min, float max, float fallback)
@@ -1840,6 +1961,15 @@ public class GhostLinePoller : MonoBehaviour
         private void SaveDisplayPreferences()
         {
             GhostLinesPlugin.SaveDisplayPreferences(stickCamEnabled, stickCamSize, playbackUiSize, darkMode);
+        }
+
+        private void SetSmoothDroneTrails(bool enabled)
+        {
+            if (smoothDroneTrails == enabled)
+                return;
+            smoothDroneTrails = enabled;
+            GhostLinesPlugin.SaveSmoothDroneTrails(enabled);
+            ClearSmoothDroneTrails();
         }
 
         private void SaveCurrentOverlayPositions()
@@ -1927,6 +2057,7 @@ public class GhostLinePoller : MonoBehaviour
         private float zoomTransitionStartPitch = 0f;
         private const float ZOOM_TRANSITION_DURATION = 0.25f;
         private const float DRONE_MARKER_HEIGHT = 2.8f;
+        private const float DRONE_TETHER_START_OFFSET = 0.15f;
         private GhostLineEntry spectatedEntry;
         public GhostLineEntry referenceEntry;
         public static GhostLinePoller Instance;
@@ -1935,11 +2066,47 @@ public class GhostLinePoller : MonoBehaviour
         private Dictionary<GhostLineEntry, Quaternion> ghostSmoothedRot = new Dictionary<GhostLineEntry, Quaternion>();
         private float ghostPosBlend = 0f;
         private Dictionary<GhostLineEntry, Transform> ghostCamMountMap = new Dictionary<GhostLineEntry, Transform>();
+        private bool pipEnabled = false;
+        private bool pipRefreshAuto = true;
+        private int pipRefreshHz = 30;
+        private float pipResolutionScale = 0.5f;
+        private List<PiPWindow> pipWindows = new List<PiPWindow>();
+        private PiPWindow pipActivated = null;
+        private float pipFov = 60f;
+        private float pipNearClip = 0.05f;
+        private float pipFarClip = 100f;
+        private bool pipCullingMaskLogged = false;
+        private const float PIP_RT_MAX_WIDTH = 1280f;
+        private const float PIP_RT_MAX_HEIGHT = 720f;
+        private const float PIP_MIN_WIDTH = 160f;
+        private const float PIP_MIN_HEIGHT = 110f;
+        private const float PIP_TITLE_HEIGHT = 24f;
+        private const float PIP_RESIZE_GRAB = 14f;
+        private const float PIP_OPEN_OFFSET = 28f;
+        private const float PIP_EDGE_THICK = 6f;
+        private const int PIP_RT_RECREATE_TOLERANCE = 3;
+        private const int PIP_EDGE_RIGHT = 1;
+        private const int PIP_EDGE_BOTTOM = 2;
+        private const int PIP_EDGE_LEFT = 4;
+        private const int PIP_EDGE_TOP = 8;
+        private const float PIP_CAMERA_FORWARD_OFFSET = 0.25f;
+        private const float PIP_CAMERA_UP_OFFSET = 0.04f;
         private class GhostTrailState
         {
             public TrailRenderer trail;
             public bool enabled;
             public bool emitting;
+        }
+
+        private class SmoothDroneTrailState
+        {
+            public GameObject objectRoot;
+            public LineRenderer line;
+            public List<Vector3> points = new List<Vector3>();
+            public List<float> times = new List<float>();
+            public float lastTime = -1f;
+            public Vector3 lastPosition;
+            public int renderedCount;
         }
 
         private struct XraySegment
@@ -1968,12 +2135,18 @@ public class GhostLinePoller : MonoBehaviour
             0, 4, 1, 5, 2, 6, 3, 7
         };
         private Dictionary<GhostLineEntry, List<GhostTrailState>> ghostTrailStates = new Dictionary<GhostLineEntry, List<GhostTrailState>>();
+        private Dictionary<GhostLineEntry, SmoothDroneTrailState> smoothDroneTrailStates = new Dictionary<GhostLineEntry, SmoothDroneTrailState>();
+        private const float SMOOTH_TRAIL_SECONDS = 1.25f;
+        private const float SMOOTH_TRAIL_SAMPLE_DISTANCE = 0.12f;
+        private const int SMOOTH_TRAIL_MAX_POINTS = 96;
+        private const float SMOOTH_TRAIL_WIDTH = 0.055f;
+        private Material smoothDroneTrailMaterial;
+        private Dictionary<Transform, List<GhostTrailState>> unmatchedGhostTrailStates = new Dictionary<Transform, List<GhostTrailState>>();
         private float ghostDroneSearchTimer = 0f;
         private int ghostMatchAttempts = 0;
         private const int GHOST_MATCH_MAX_ATTEMPTS = 15;
         private const float GHOST_MATCH_RETRY_INTERVAL = 2f;
         private bool recordingConstructionThreadChecked = false;
-        private HashSet<Transform> cameraMountLoggedRoots = new HashSet<Transform>();
         private bool lateIsThirdPerson = true;
         private Vector3 ghostDronePos;
         private bool ghostDronePosValid = false;
@@ -2001,8 +2174,12 @@ public class GhostLinePoller : MonoBehaviour
         private GUIStyle settingsAxisLabelStyle;
         private GUIStyle settingsHeaderStyle;
         private GUIStyle settingsSectionStyle;
+        private GUIStyle settingsSmallRightStyle;
+        private GUIStyle settingsSectionRightStyle;
+        private GUIStyle settingsSectionLeftStyle;
         private GUIStyle settingsPlusStyle;
         private GUIStyle settingsCloseStyle;
+        private GUIStyle settingsTooltipStyle;
         private GUIStyle playbackTimeLeftStyle;
         private GUIStyle playbackTimeRightStyle;
         private GUIStyle playbackSpeedStyle;
@@ -2023,6 +2200,17 @@ public class GhostLinePoller : MonoBehaviour
                 }
             }
             ghostTrailStates.Clear();
+            foreach (var pair in unmatchedGhostTrailStates)
+            {
+                if (pair.Value == null) continue;
+                foreach (var state in pair.Value)
+                {
+                    if (state == null || state.trail == null) continue;
+                    state.trail.enabled = state.enabled;
+                    state.trail.emitting = state.emitting;
+                }
+            }
+            unmatchedGhostTrailStates.Clear();
         }
 
         private void CacheGhostTrails(GhostLineEntry entry, Transform drone)
@@ -2034,6 +2222,45 @@ public class GhostLinePoller : MonoBehaviour
             {
                 RestoreGhostTrailsForEntry(entry);
                 ghostTrailStates.Remove(entry);
+            }
+
+            List<GhostTrailState> states;
+            if (unmatchedGhostTrailStates.TryGetValue(drone, out states))
+            {
+                unmatchedGhostTrailStates.Remove(drone);
+                ghostTrailStates[entry] = states;
+                SetGhostTrailsSuppressed(entry, true);
+                return;
+            }
+
+            states = new List<GhostTrailState>();
+            foreach (var trail in drone.GetComponentsInChildren<TrailRenderer>(true))
+            {
+                if (trail == null) continue;
+                states.Add(new GhostTrailState
+                {
+                    trail = trail,
+                    enabled = trail.enabled,
+                    emitting = trail.emitting
+                });
+                trail.Clear();
+                trail.emitting = false;
+                trail.enabled = false;
+            }
+            ghostTrailStates[entry] = states;
+            SetGhostTrailsSuppressed(entry, true);
+        }
+
+        private void SuppressUnmatchedGhostTrails(Transform drone)
+        {
+            if (drone == null || unmatchedGhostTrailStates.ContainsKey(drone))
+                return;
+
+            // Do not re-capture a root that is already assigned to an entry.
+            foreach (var pair in ghostDroneMap)
+            {
+                if (pair.Value == drone)
+                    return;
             }
 
             var states = new List<GhostTrailState>();
@@ -2050,8 +2277,7 @@ public class GhostLinePoller : MonoBehaviour
                 trail.emitting = false;
                 trail.enabled = false;
             }
-            ghostTrailStates[entry] = states;
-            SetGhostTrailsSuppressed(entry, true);
+            unmatchedGhostTrailStates[drone] = states;
         }
 
         private void RestoreGhostTrailsForEntry(GhostLineEntry entry)
@@ -2103,7 +2329,7 @@ public class GhostLinePoller : MonoBehaviour
             if (entry.markerObject != null)
                 entry.markerObject.SetActive(true);
             if (entry.markerTether != null)
-                entry.markerTether.enabled = GhostLinesPlugin.showNameTags || GhostLinesPlugin.showDeltaDisplay;
+                entry.markerTether.enabled = (GhostLinesPlugin.showNameTags && entry.nameTagVisible) || GhostLinesPlugin.showDeltaDisplay;
             SetGhostTrailsSuppressed(entry, true);
         }
 
@@ -2120,12 +2346,18 @@ public class GhostLinePoller : MonoBehaviour
                     InvalidateXrayMapCache();
                 }
                 if (mappedRoot != null)
-                    cameraMountLoggedRoots.Remove(mappedRoot);
                 ghostDroneMap.Remove(entry);
             }
             ghostCamMountMap.Remove(entry);
             RestoreGhostTrailsForEntry(entry);
             ghostTrailStates.Remove(entry);
+            SmoothDroneTrailState smoothTrail;
+            if (smoothDroneTrailStates.TryGetValue(entry, out smoothTrail))
+            {
+                if (smoothTrail != null && smoothTrail.objectRoot != null)
+                    UnityEngine.Object.Destroy(smoothTrail.objectRoot);
+                smoothDroneTrailStates.Remove(entry);
+            }
             GhostLinesPlugin.DestroyLineResources(entry);
             if (entry.markerObject != null) UnityEngine.Object.Destroy(entry.markerObject);
             entry.markerObject = null;
@@ -2156,6 +2388,7 @@ public class GhostLinePoller : MonoBehaviour
             ghostSmoothedPos.Clear();
             ghostSmoothedRot.Clear();
             ghostCamMountMap.Clear();
+            ClearSmoothDroneTrails();
             spectatedEntry = null;
             referenceEntry = null;
             referenceAutoInitialized = false;
@@ -2707,6 +2940,7 @@ public class GhostLinePoller : MonoBehaviour
         private void DeactivateReplay()
         {
             RestoreHoldZoom();
+            CloseAllPiPWindows();
             RestoreNativeStandingsTextStyles();
             int cameraModeToRestore = replayEntryCameraMode != 0
                 ? replayEntryCameraMode
@@ -2725,7 +2959,6 @@ public class GhostLinePoller : MonoBehaviour
             settingsPinned = false;
             settingsFadeAmount = 0f;
             stickGraphs.Clear();
-            xrayEnabled = false;
             xrayStructuresBuilt = false;
             xrayStructures.Clear();
             xrayVisibleStructures.Clear();
@@ -2840,7 +3073,7 @@ public class GhostLinePoller : MonoBehaviour
             settingsFadeAmount = 0f;
             stickGraphs.Clear();
             settingsDragging = false;
-            settingsRect = new Rect(-1f, -1f, 304f, 360f);
+            settingsRect = new Rect(-1f, -1f, 320f, 360f);
             sliderComponent = null;
             sliderValueProp = null;
             replayController = null;
@@ -2878,7 +3111,6 @@ public class GhostLinePoller : MonoBehaviour
             fpvOnReplayPending = false;
             fpvForceLogged = false;
             referenceAutoInitialized = false;
-            xrayEnabled = false;
             xrayStructuresBuilt = false;
             xrayStructures.Clear();
             xrayVisibleStructures.Clear();
@@ -2899,13 +3131,13 @@ public class GhostLinePoller : MonoBehaviour
             noTargetLogged = false;
             spectatedEntry = null;
             referenceEntry = null;
+            ClearSmoothDroneTrails();
             ghostDroneMap.Clear();
             ghostSmoothedPos.Clear();
             ghostSmoothedRot.Clear();
             ghostCamMountMap.Clear();
             ghostDroneSearchTimer = 0f;
             ghostMatchAttempts = 0;
-            cameraMountLoggedRoots.Clear();
             lateIsThirdPerson = true;
             ghostDronePosValid = false;
             ghostDronePos = Vector3.zero;
@@ -3083,6 +3315,7 @@ public class GhostLinePoller : MonoBehaviour
             RestoreHoldZoom();
             CancelCameraLook();
             ClearActiveReplayEntries();
+            CloseAllPiPWindows();
             if (Instance == this) Instance = null;
         }
 
@@ -4623,6 +4856,14 @@ public class GhostLinePoller : MonoBehaviour
             if (replayReady && bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame && Input.GetKeyDown(GhostLinesPlugin.GetBinding("graph")))
                 OpenStickGraph();
 
+            if (replayReady && bindingListeningFor == null && Time.frameCount != bindingCaptureSuppressFrame && Input.GetKeyDown(GhostLinesPlugin.GetBinding("pip")))
+            {
+                if (!pipEnabled)
+                    SetPipEnabled(true);
+                if (spectatedEntry != null)
+                    TogglePiPWindow(spectatedEntry);
+            }
+
             if (replayControlsObj == null)
             {
                 GameObject btn = Time.time < nextReplayControlsSearch ? null : GameObject.Find("btnPlay");
@@ -4665,6 +4906,12 @@ public class GhostLinePoller : MonoBehaviour
             if (replayControlsObj != null && replayController == null)
                 CacheReplayController();
             UpdateReplayLifecycle();
+            if (pipEnabled)
+                TickPiPWindows();
+            else if (pipWindows.Count > 0)
+                CloseAllPiPWindows();
+            HandlePiPWindowMouse();
+            HandleOverlayResizeMouse();
             if (!replayReady)
                 return;
 
@@ -4694,7 +4941,7 @@ public class GhostLinePoller : MonoBehaviour
             if (Input.GetKeyDown(GhostLinesPlugin.GetBinding("linesthrough")))
                 GhostLinesPlugin.SetLinesThroughObjects(!GhostLinesPlugin.linesThroughObjects);
             if (Input.GetKeyDown(GhostLinesPlugin.GetBinding("delta")))
-                GhostLinesPlugin.showDeltaDisplay = !GhostLinesPlugin.showDeltaDisplay;
+                GhostLinesPlugin.SetDeltaDisplay(!GhostLinesPlugin.showDeltaDisplay);
             if (Input.GetKeyDown(GhostLinesPlugin.GetBinding("heatmap")))
                 GhostLinesPlugin.ToggleSpeedHeatmap();
             if (Input.GetKeyDown(GhostLinesPlugin.GetBinding("loop")))
@@ -5298,6 +5545,114 @@ public class GhostLinePoller : MonoBehaviour
                     pair.Value.SetPositionAndRotation(smoothed, smoothedRot);
                 }
             }
+            UpdateSmoothDroneTrails(replayTime);
+        }
+
+        private void EnsureSmoothDroneTrailMaterial()
+        {
+            if (smoothDroneTrailMaterial != null)
+                return;
+            Shader shader = Shader.Find("Sprites/Default");
+            if (shader == null)
+                shader = Shader.Find("Unlit/Color");
+            if (shader == null)
+                return;
+            smoothDroneTrailMaterial = new Material(shader);
+            smoothDroneTrailMaterial.hideFlags = HideFlags.HideAndDontSave;
+        }
+
+        private SmoothDroneTrailState GetSmoothDroneTrailState(GhostLineEntry entry)
+        {
+            SmoothDroneTrailState state;
+            if (smoothDroneTrailStates.TryGetValue(entry, out state) && state != null && state.line != null)
+                return state;
+            EnsureSmoothDroneTrailMaterial();
+            if (smoothDroneTrailMaterial == null)
+                return null;
+            GameObject obj = new GameObject("GhostLinesSmoothTrail");
+            obj.hideFlags = HideFlags.HideAndDontSave;
+            LineRenderer line = obj.AddComponent<LineRenderer>();
+            line.useWorldSpace = true;
+            line.sharedMaterial = smoothDroneTrailMaterial;
+            line.widthMultiplier = SMOOTH_TRAIL_WIDTH;
+            line.widthCurve = new AnimationCurve(new Keyframe(0f, 0.2f), new Keyframe(1f, 1f));
+            line.numCapVertices = 3;
+            line.numCornerVertices = 3;
+            line.textureMode = LineTextureMode.Stretch;
+            line.alignment = LineAlignment.View;
+            line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            line.receiveShadows = false;
+            line.enabled = false;
+            state = new SmoothDroneTrailState { objectRoot = obj, line = line };
+            smoothDroneTrailStates[entry] = state;
+            return state;
+        }
+
+        private void UpdateSmoothDroneTrails(float replayTime)
+        {
+            if (!smoothDroneTrails)
+                return;
+            foreach (var pair in ghostDroneMap)
+            {
+                GhostLineEntry entry = pair.Key;
+                Transform drone = pair.Value;
+                if (entry == null || drone == null)
+                    continue;
+                SmoothDroneTrailState state = GetSmoothDroneTrailState(entry);
+                if (state == null)
+                    continue;
+                Vector3 position;
+                if (!ghostSmoothedPos.TryGetValue(entry, out position))
+                    position = drone.position;
+                if (state.lastTime >= 0f && replayTime < state.lastTime - 0.02f ||
+                    state.lastTime >= 0f && Mathf.Abs(replayTime - state.lastTime) > 0.3f)
+                {
+                    state.points.Clear();
+                    state.times.Clear();
+                }
+                bool addPoint = state.points.Count == 0 ||
+                    (position - state.lastPosition).sqrMagnitude >= SMOOTH_TRAIL_SAMPLE_DISTANCE * SMOOTH_TRAIL_SAMPLE_DISTANCE;
+                if (addPoint)
+                {
+                    state.points.Add(position);
+                    state.times.Add(replayTime);
+                    state.lastPosition = position;
+                    while (state.points.Count > SMOOTH_TRAIL_MAX_POINTS ||
+                        (state.times.Count > 1 && replayTime - state.times[0] > SMOOTH_TRAIL_SECONDS))
+                    {
+                        state.points.RemoveAt(0);
+                        state.times.RemoveAt(0);
+                    }
+                }
+                state.lastTime = replayTime;
+                if (state.points.Count < 2)
+                {
+                    state.line.enabled = false;
+                    continue;
+                }
+                Color color = entry.color;
+                color.a = 0.9f;
+                state.line.startColor = new Color(color.r, color.g, color.b, 0.05f);
+                state.line.endColor = color;
+                if (addPoint || state.renderedCount != state.points.Count)
+                {
+                    state.line.positionCount = state.points.Count;
+                    for (int i = 0; i < state.points.Count; i++)
+                        state.line.SetPosition(i, state.points[i]);
+                    state.renderedCount = state.points.Count;
+                }
+                state.line.enabled = true;
+            }
+        }
+
+        private void ClearSmoothDroneTrails()
+        {
+            foreach (var pair in smoothDroneTrailStates)
+            {
+                if (pair.Value != null && pair.Value.objectRoot != null)
+                    UnityEngine.Object.Destroy(pair.Value.objectRoot);
+            }
+            smoothDroneTrailStates.Clear();
         }
 
         private GhostLineEntry FindEntryForNativeRoot(Transform root)
@@ -5620,6 +5975,7 @@ public class GhostLinePoller : MonoBehaviour
         private void SetXrayEnabled(bool enabled)
         {
             xrayEnabled = enabled;
+            GhostLinesPlugin.SaveGlobalDisplayPreferences();
             if (!enabled)
                 return;
 
@@ -5782,14 +6138,13 @@ public class GhostLinePoller : MonoBehaviour
             Graphics.DrawMeshNow(xrayMapMesh, Matrix4x4.identity);
         }
 
-        private void DrawXrayDrone(Camera cam)
+        private void DrawXrayDrones(Camera cam)
         {
-            if (spectatedEntry == null || xrayWireMaterial == null)
+            if (xrayWireMaterial == null)
                 return;
             Transform root;
-            if (!ghostDroneMap.TryGetValue(spectatedEntry, out root) || root == null)
+            if (spectatedEntry == null || !ghostDroneMap.TryGetValue(spectatedEntry, out root) || root == null)
                 return;
-
             if (xrayDroneRoot != root)
             {
                 xrayDroneRoot = root;
@@ -5824,8 +6179,7 @@ public class GhostLinePoller : MonoBehaviour
                 for (int i = 0; i < selectedBodies.Count && i < 3; i++)
                     xrayDroneFilters.Add(selectedBodies[i]);
             }
-
-            DrawXrayDroneBounds(cam, root.position, spectatedEntry.color);
+            DrawXrayDroneBounds(cam, root.position, Color.white);
         }
 
         private void DrawXrayDroneBounds(Camera cam, Vector3 dronePosition, Color color)
@@ -5890,7 +6244,7 @@ public class GhostLinePoller : MonoBehaviour
             if (xrayWireMaterial == null)
                 return;
             DrawXrayMap();
-            DrawXrayDrone(cam);
+            DrawXrayDrones(cam);
         }
 
         private void OnCameraPreRender(Camera cam)
@@ -6628,16 +6982,16 @@ public class GhostLinePoller : MonoBehaviour
                     continue;
 
                 entry.markerObject.SetActive(true);
-                entry.markerTether.enabled = GhostLinesPlugin.showNameTags || GhostLinesPlugin.showDeltaDisplay;
+                entry.markerTether.enabled = (GhostLinesPlugin.showNameTags && entry.nameTagVisible) || GhostLinesPlugin.showDeltaDisplay;
                 MeshRenderer nameRenderer = entry.markerText.GetComponent<MeshRenderer>();
                 if (nameRenderer != null)
-                    nameRenderer.enabled = GhostLinesPlugin.showNameTags;
+                    nameRenderer.enabled = GhostLinesPlugin.showNameTags && entry.nameTagVisible;
 
                 float markerHeight = entry.markerBaseHeight > 0f ? entry.markerBaseHeight : DRONE_MARKER_HEIGHT;
                 Vector3 labelPos = dronePos + Vector3.up * markerHeight;
 
                 entry.markerObject.transform.position = dronePos;
-                entry.markerTether.SetPosition(0, Vector3.zero);
+                entry.markerTether.SetPosition(0, Vector3.up * DRONE_TETHER_START_OFFSET);
 
                 Transform labelT = entry.markerText.transform;
                 labelT.position = labelPos;
@@ -6660,7 +7014,7 @@ public class GhostLinePoller : MonoBehaviour
                 entry.markerTether.SetPosition(1, Vector3.up * Mathf.Max(tetherTop, 0.3f));
 
                 // Rebuild the click target after enabling and refreshing the text mesh.
-                if (GhostLinesPlugin.showNameTags && nameRenderer != null)
+                if (GhostLinesPlugin.showNameTags && entry.nameTagVisible && nameRenderer != null)
                     AddDroneLabelHitbox(entry, nameRenderer.bounds, Camera.main);
             }
         }
@@ -6877,6 +7231,33 @@ public class GhostLinePoller : MonoBehaviour
             stickRingTex.Apply();
         }
 
+        private void ComputeStickCamOverlayRect()
+        {
+            float panelSize = Mathf.Clamp(Screen.height * 0.11f, 68f, 96f) * stickCamSize;
+            float gap = 14f * stickCamSize;
+            float groupW = panelSize * 2f + gap;
+            float groupH = panelSize;
+            float cx = stickCamX < 0f ? Screen.width * 0.5f : stickCamX;
+            float cy = stickCamY < 0f ? Screen.height - 56f - panelSize * 0.5f - 10f : stickCamY;
+            cx = Mathf.Clamp(cx, groupW * 0.5f + 2f, Screen.width - groupW * 0.5f - 2f);
+            cy = Mathf.Clamp(cy, groupH * 0.5f + 2f, Screen.height - groupH * 0.5f - 2f);
+            currentStickCamOverlayRect = new Rect(cx - groupW * 0.5f - 5f, cy - groupH * 0.5f - 5f, groupW + 10f, groupH + 10f);
+            currentStickCamOverlayRectValid = true;
+        }
+
+        private void ComputePlaybackOverlayRect()
+        {
+            float s = playbackUiSize;
+            float barH = 56f * s;
+            float barW = (Screen.width / 3f) * s;
+            float cx = scrubberX < 0 ? Screen.width * 0.5f : scrubberX;
+            float cy = scrubberY < 0 ? Screen.height - barH * 0.5f : scrubberY;
+            cx = Mathf.Clamp(cx, barW * 0.5f, Screen.width - barW * 0.5f);
+            cy = Mathf.Clamp(cy, barH * 0.5f + 2f, Screen.height - barH * 0.5f);
+            currentPlaybackOverlayRect = new Rect(cx - barW * 0.5f - 5f * s, cy - barH * 0.5f - 5f * s, barW + 10f * s, barH + 10f * s);
+            currentPlaybackOverlayRectValid = true;
+        }
+
         private void DrawStickCam()
         {
             if (!replayReady || !stickCamEnabled || spectatedEntry == null)
@@ -6915,16 +7296,17 @@ public class GhostLinePoller : MonoBehaviour
 
             var ev = Event.current;
             Vector2 mp = ev.mousePosition;
-            if (ev.type == EventType.MouseDown && ev.button == 0 && totalRect.Contains(mp))
+            if (ev.type == EventType.MouseDown && ev.button == 0 && totalRect.Contains(mp) && !IsUiBlockedFor(UI_LAYER_STICKCAM, mp))
             {
-                if (Time.realtimeSinceStartup - lastStickCamClickTime < 0.35f &&
+                uiFrontLayer = UI_LAYER_STICKCAM;
+                if (!stickCamResizing && Time.realtimeSinceStartup - lastStickCamClickTime < 0.35f &&
                     (mp - lastStickCamClickPos).sqrMagnitude < 36f)
                 {
                     lastStickCamClickTime = -1f;
                     draggingStickCam = false;
                     OpenStickGraph();
                 }
-                else
+                else if (!stickCamResizing && stickCamEdgeHover == 0)
                 {
                     lastStickCamClickTime = Time.realtimeSinceStartup;
                     lastStickCamClickPos = mp;
@@ -6952,6 +7334,16 @@ public class GhostLinePoller : MonoBehaviour
                     ev.Use();
                 }
             }
+            else if (stickCamResizing && ev.type == EventType.MouseUp && ev.button == 0)
+            {
+                stickCamResizing = false;
+                stickCamResizeEdge = 0;
+                SaveCurrentOverlayPositions();
+                SaveDisplayPreferences();
+                ev.Use();
+            }
+
+            DrawStickCamCornerHighlights(totalRect, stickCamResizing ? stickCamResizeEdge : stickCamEdgeHover);
 
             EnsureStickTextures();
             DrawStickPanel(leftPanel, leftStick);
@@ -7120,6 +7512,8 @@ public class GhostLinePoller : MonoBehaviour
                         break;
                     }
                 }
+                if (!covered && IsUiBlockedFor(UI_LAYER_STICKGRAPH, e.mousePosition))
+                    covered = true;
 
                 Color old = GUI.color;
 
@@ -7224,6 +7618,7 @@ public class GhostLinePoller : MonoBehaviour
                     g.channelDropdown = false;
                     g.pilotDropdown = false;
                     stickGraphActivated = g;
+                    uiFrontLayer = UI_LAYER_STICKGRAPH;
                     e.Use();
                 }
                 if (g.resizing && e.type == EventType.MouseDrag && e.button == 0)
@@ -7283,6 +7678,7 @@ public class GhostLinePoller : MonoBehaviour
                     g.dragCandidate = true;
                     g.dragOffset = e.mousePosition - new Vector2(panel.x, panel.y);
                     stickGraphActivated = g;
+                    uiFrontLayer = UI_LAYER_STICKGRAPH;
                 }
                 if (g.dragging && e.type == EventType.MouseDrag && e.button == 0)
                 {
@@ -7314,6 +7710,7 @@ public class GhostLinePoller : MonoBehaviour
                     g.channelDropdown = false;
                     g.dragCandidate = false;
                     stickGraphActivated = g;
+                    uiFrontLayer = UI_LAYER_STICKGRAPH;
                     settingsControlPressed = true;
                     e.Use();
                 }
@@ -7369,19 +7766,22 @@ public class GhostLinePoller : MonoBehaviour
                     g.heatmap = !g.heatmap;
                     g.dragCandidate = false;
                     stickGraphActivated = g;
+                    uiFrontLayer = UI_LAYER_STICKGRAPH;
                     settingsControlPressed = true;
                     e.Use();
                 }
 
-                if (DrawStyledToggleButton(pin, iconPin, g.pinned, alpha, !covered))
+                if (DrawStyledToggleButton(pin, iconPin, g.pinned, alpha, !covered, UI_LAYER_STICKGRAPH))
                 {
                     g.pinned = !g.pinned;
                     stickGraphActivated = g;
+                    uiFrontLayer = UI_LAYER_STICKGRAPH;
                 }
                 GUI.color = ThemeCloseLabel(alpha);
                 GUI.Label(close, "x", settingsCloseStyle);
                 if (!covered && e.type == EventType.MouseUp && e.button == 0 && close.Contains(e.mousePosition))
                 {
+                    uiFrontLayer = UI_LAYER_STICKGRAPH;
                     if (g.traceTex != null)
                     {
                         Destroy(g.traceTex);
@@ -7664,6 +8064,8 @@ public class GhostLinePoller : MonoBehaviour
             }
         }
 
+        private GhostLineEntry lastDeltaRefEntry;
+
         private void UpdateReferenceDeltaDisplay(float replayTime)
         {
             var refEntry = referenceEntry;
@@ -7687,8 +8089,25 @@ public class GhostLinePoller : MonoBehaviour
                 return;
             }
 
-            float refFinishTime = refEntry.finishTime;
-            float effReplayTime = (refFinishTime > 0f && replayTime > refFinishTime) ? refFinishTime : replayTime;
+            float refRaceEnd = refEntry.finishTime > 0f
+                ? refEntry.finishTime
+                : (refEntry.stateTimes != null && refEntry.stateTimes.Length > 0 ? refEntry.stateTimes[refEntry.stateTimes.Length - 1] - GetGateTimestamp(refEntry) : -1f);
+
+            float effReplayTime = (refRaceEnd > 0f && replayTime > refRaceEnd) ? refRaceEnd : replayTime;
+
+            if (lastDeltaRefEntry != refEntry)
+            {
+                lastDeltaRefEntry = refEntry;
+                foreach (var entry in GhostLinesPlugin.entries)
+                {
+                    entry.lastRefMatchDist = float.NaN;
+                    entry.lastRefMatchReplayTime = float.NaN;
+                    entry.lastRefDistNow = float.NaN;
+                    entry.lastDeltaRawValue = float.NaN;
+                    entry.lastDeltaUpdateTime = -1f;
+                    entry.lastDeltaReplayTime = float.NaN;
+                }
+            }
 
             float refDist = GetDistanceAlongPath(refEntry, effReplayTime);
             float refLapDist = Mathf.Max(0f, refDist - refEntry.lapStartDistance);
@@ -7697,19 +8116,24 @@ public class GhostLinePoller : MonoBehaviour
             {
                 if (entry.deltaText == null) continue;
 
+                float ghostRaceEnd = entry.finishTime > 0f
+                    ? entry.finishTime
+                    : (entry.stateTimes != null && entry.stateTimes.Length > 0 ? entry.stateTimes[entry.stateTimes.Length - 1] - GetGateTimestamp(entry) : -1f);
+
                 if (entry == refEntry)
                 {
                     float shown = Mathf.Max(0f, replayTime);
-                    if (entry.finishTime > 0f && shown > entry.finishTime)
-                        shown = entry.finishTime;
-                    if (Mathf.Abs(shown - entry.lastDeltaShownValue) >= 0.0005f || entry.lastShownDeltaText == null || entry.lastShownDeltaText == ""
-                        || entry.deltaText.gameObject.activeSelf != GhostLinesPlugin.showDeltaDisplay
+                    if (ghostRaceEnd > 0f && shown > ghostRaceEnd)
+                        shown = ghostRaceEnd;
+
+                    if (Mathf.Abs(shown - entry.lastDeltaShownValue) >= 0.0005f || string.IsNullOrEmpty(entry.lastShownDeltaText)
+                        || entry.deltaText.gameObject.activeSelf != (GhostLinesPlugin.showDeltaDisplay && entry.deltaDisplayVisible)
                         || entry.deltaText.text != entry.lastShownDeltaText)
                     {
                         string timeText = shown.ToString("F3");
                         entry.lastDeltaShownValue = shown;
                         entry.lastShownDeltaText = timeText;
-                        SetDeltaText(entry, timeText, Color.white, GhostLinesPlugin.showDeltaDisplay);
+                        SetDeltaText(entry, timeText, Color.white, GhostLinesPlugin.showDeltaDisplay && entry.deltaDisplayVisible);
                     }
                     continue;
                 }
@@ -7721,35 +8145,48 @@ public class GhostLinePoller : MonoBehaviour
                     continue;
                 }
 
-                float entryDist = GetDistanceAlongPath(entry, replayTime);
+                float matchTime = replayTime;
+                if (ghostRaceEnd > 0f && matchTime > ghostRaceEnd) matchTime = ghostRaceEnd;
+
+                float entryDist = GetDistanceAlongPath(entry, matchTime);
                 float entryLapDist = Mathf.Max(0f, entryDist - entry.lapStartDistance);
 
-                float delta;
-                if (entry.finishTime > 0f && refFinishTime > 0f && replayTime >= entry.finishTime)
+                float rawDelta;
+                bool lockFinalDelta = false;
+                // Treat the recording's final sample as the finish boundary.  The
+                // replay clock can advance a frame or two beyond that sample, so
+                // lock as soon as the pilot reaches the boundary instead of
+                // continuing to derive a live geometric delta from a finished lap.
+                if (ghostRaceEnd > 0f && refRaceEnd > 0f && replayTime >= ghostRaceEnd - 0.02f)
                 {
-                    delta = entry.finishTime - refFinishTime;
+                    rawDelta = ghostRaceEnd - refRaceEnd;
+                    lockFinalDelta = true;
                 }
                 else if (refLapDist <= 0f || entryLapDist <= 0f)
                 {
-                    delta = 0f;
+                    rawDelta = 0f;
                 }
                 else
                 {
                     Vector3 entryPos;
-                    if (!TryGetDronePosition(entry, replayTime, out entryPos) ||
-                        !TryGetNearestRefPathDistance(refEntry, entry, entryPos, replayTime, out float refDistAtEntryPos))
+                    float refTimeAtEntryPos;
+                    float refDistAtEntryPos;
+                    if (!TryGetDronePosition(entry, matchTime, out entryPos) ||
+                        !TryGetNearestRefPathDistance(refEntry, entry, entryPos, matchTime, out refDistAtEntryPos))
                     {
-                        delta = 0f;
+                        rawDelta = float.IsNaN(entry.lastDeltaRawValue) ? 0f : entry.lastDeltaRawValue;
                     }
                     else
                     {
-                        float refTimeAtEntryPos = GetTimeAtDistance(refEntry, refDistAtEntryPos) - refEntry.lapStartOffset;
-                        delta = replayTime - refTimeAtEntryPos;
+                        refTimeAtEntryPos = GetTimeAtDistance(refEntry, refDistAtEntryPos) - refEntry.lapStartOffset;
+                        rawDelta = matchTime - refTimeAtEntryPos;
                     }
                 }
 
+                float delta = GetDisplayedDelta(entry, rawDelta, replayTime, lockFinalDelta);
+
                 if (Mathf.Abs(delta - entry.lastDeltaShownValue) < 0.0005f && entry.lastShownDeltaText != null
-                    && entry.deltaText.gameObject.activeSelf == GhostLinesPlugin.showDeltaDisplay
+                    && entry.deltaText.gameObject.activeSelf == (GhostLinesPlugin.showDeltaDisplay && entry.deltaDisplayVisible)
                     && entry.deltaText.text == entry.lastShownDeltaText)
                     continue;
                 entry.lastDeltaShownValue = delta;
@@ -7759,8 +8196,37 @@ public class GhostLinePoller : MonoBehaviour
                 Color deltaColor = delta > 0f
                     ? new Color(1f, 0.15f, 0.15f, 1f)
                     : new Color(0.2f, 1f, 0.25f, 1f);
-                SetDeltaText(entry, text, deltaColor, GhostLinesPlugin.showDeltaDisplay);
+                SetDeltaText(entry, text, deltaColor, GhostLinesPlugin.showDeltaDisplay && entry.deltaDisplayVisible);
             }
+        }
+
+        private static float GetDisplayedDelta(GhostLineEntry entry, float rawDelta, float replayTime, bool lockFinalDelta)
+        {
+            // Recordings are sampled at 10 Hz.  The geometric match can therefore
+            // alternate between adjacent samples even while the drone is flying
+            // smoothly.  Keep the measurement raw, but make only the text move
+            // continuously so a one-sample switch is not shown as a 0.1 s jump.
+            float now = Time.realtimeSinceStartup;
+            float shown = entry.lastDeltaShownValue;
+            bool replayRestarted = !float.IsNaN(entry.lastDeltaReplayTime)
+                && replayTime < entry.lastDeltaReplayTime - 0.02f;
+            bool replayJumped = !float.IsNaN(entry.lastDeltaReplayTime)
+                && Mathf.Abs(replayTime - entry.lastDeltaReplayTime) > 0.25f;
+            entry.lastDeltaRawValue = rawDelta;
+            entry.lastDeltaReplayTime = replayTime;
+
+            // Scrubbing and frame seeks are discontinuities, not flight motion.
+            // Show their measured value immediately; reserve the slew limiter for
+            // adjacent 10 Hz recording-sample changes during normal playback.
+            if (lockFinalDelta || replayRestarted || replayJumped || float.IsNaN(shown) || entry.lastDeltaUpdateTime < 0f)
+            {
+                entry.lastDeltaUpdateTime = now;
+                return rawDelta;
+            }
+
+            float elapsed = Mathf.Clamp(now - entry.lastDeltaUpdateTime, 0f, 0.25f);
+            entry.lastDeltaUpdateTime = now;
+            return Mathf.MoveTowards(shown, rawDelta, elapsed * 1.5f);
         }
 
         private static void SetDeltaText(GhostLineEntry entry, string text, Color color, bool visible)
@@ -7931,8 +8397,15 @@ public class GhostLinePoller : MonoBehaviour
             float replayTime;
             if (!TryGetReplayTime(out replayTime))
                 return;
-            SetReplayTime(Mathf.Max(0f, replayTime + direction * FRAME_STEP_SECONDS));
+            float target = Mathf.Max(0f, replayTime + direction * FRAME_STEP_SECONDS);
+            float nativeMaximum = GetNativeReplayMaximum(target);
+            target = Mathf.Max(Mathf.Min(target, GetTrimEnd(nativeMaximum)), GetPlaybackStart());
+            SetReplayTime(target);
             frameStepPaused = true;
+            pipStepTargetTime = target;
+            pipForceRenderFrame = Time.frameCount + 12;
+            for (int i = 0; i < pipWindows.Count; i++)
+                pipWindows[i].rtDirty = true;
         }
 
         private void HandleFrameStepInput()
@@ -8265,25 +8738,7 @@ public class GhostLinePoller : MonoBehaviour
                 return true;
             }
 
-            int hi = FindFirstStateAtOrAfter(entry.stateTimes, queryT);
-
-            if (hi <= 0)
-            {
-                position = entry.originalPositions[0];
-                return true;
-            }
-
-            if (hi >= entry.stateTimes.Length)
-            {
-                position = entry.originalPositions[entry.originalPositions.Length - 1];
-                return true;
-            }
-
-            int lo = hi - 1;
-            float t0 = entry.stateTimes[lo];
-            float t1 = entry.stateTimes[hi];
-            float u = Mathf.Approximately(t1, t0) ? 0f : Mathf.InverseLerp(t0, t1, queryT);
-            position = Vector3.Lerp(entry.originalPositions[lo], entry.originalPositions[hi], u);
+            position = SampleInterpolatedPosition(entry.stateTimes, entry.originalPositions, queryT);
             return true;
         }
 
@@ -8307,7 +8762,7 @@ public class GhostLinePoller : MonoBehaviour
             int lo = hi - 1;
             float t0 = entry.stateTimes[lo], t1 = entry.stateTimes[hi];
             float u = Mathf.Approximately(t1, t0) ? 0f : Mathf.InverseLerp(t0, t1, queryT);
-            pos = Vector3.LerpUnclamped(entry.originalPositions[lo], entry.originalPositions[hi], u);
+            pos = SampleInterpolatedPosition(entry.stateTimes, entry.originalPositions, queryT);
             rot = Quaternion.SlerpUnclamped(entry.originalRotations[lo], entry.originalRotations[hi], u);
             return true;
         }
@@ -8334,7 +8789,7 @@ public class GhostLinePoller : MonoBehaviour
             int lo = hi - 1;
             float t0 = entry.stateTimes[lo], t1 = entry.stateTimes[hi];
             float u = Mathf.Approximately(t1, t0) ? 0f : Mathf.InverseLerp(t0, t1, queryT);
-            pos = Vector3.LerpUnclamped(entry.originalPositions[lo], entry.originalPositions[hi], u);
+            pos = SampleInterpolatedPosition(entry.stateTimes, entry.originalPositions, queryT);
             rot = Quaternion.SlerpUnclamped(entry.originalRotations[lo], entry.originalRotations[hi], u);
             return true;
         }
@@ -8354,9 +8809,59 @@ public class GhostLinePoller : MonoBehaviour
             return low;
         }
 
+        private static Vector3 SampleInterpolatedPosition(float[] times, Vector3[] positions, float queryT)
+        {
+            int n = times.Length;
+            if (n == 0) return Vector3.zero;
+            if (n == 1) return positions[0];
+            if (queryT <= times[0]) return positions[0];
+            if (queryT >= times[n - 1]) return positions[n - 1];
+
+            int hi = FindFirstStateAtOrAfter(times, queryT);
+            if (hi <= 0) return positions[0];
+            if (hi >= n) return positions[n - 1];
+
+            int lo = hi - 1;
+            float t1 = times[lo];
+            float t2 = times[hi];
+            float h = t2 - t1;
+            if (h <= 0.0001f)
+                return positions[lo];
+
+            Vector3 p1 = positions[lo];
+            Vector3 p2 = positions[hi];
+            float hPrev = lo >= 1 ? t1 - times[lo - 1] : 0f;
+            float hNext = hi + 1 < n ? times[hi + 1] - t2 : 0f;
+            Vector3 mCur = (p2 - p1) / h;
+            Vector3 mPrev = hPrev > 0.0001f ? (p1 - positions[lo - 1]) / hPrev : Vector3.zero;
+            Vector3 mNext = hNext > 0.0001f ? (positions[hi + 1] - p2) / hNext : Vector3.zero;
+            Vector3 d1 = hPrev > 0.0001f ? FritschCarlsonTangent(mPrev, mCur) : mCur;
+            Vector3 d2 = hNext > 0.0001f ? FritschCarlsonTangent(mCur, mNext) : mCur;
+
+            float s = (queryT - t1) / h;
+            float s2 = s * s;
+            float s3 = s2 * s;
+            float h00 = 2f * s3 - 3f * s2 + 1f;
+            float h10 = s3 - 2f * s2 + s;
+            float h01 = -2f * s3 + 3f * s2;
+            float h11 = s3 - s2;
+            return p1 * h00 + d1 * (h * h10) + p2 * h01 + d2 * (h * h11);
+        }
+
+        private static Vector3 FritschCarlsonTangent(Vector3 mPrev, Vector3 mCur)
+        {
+            Vector3 d = Vector3.zero;
+            if (mPrev.x * mCur.x > 0f)
+                d.x = 2f * mPrev.x * mCur.x / (mPrev.x + mCur.x);
+            if (mPrev.y * mCur.y > 0f)
+                d.y = 2f * mPrev.y * mCur.y / (mPrev.y + mCur.y);
+            if (mPrev.z * mCur.z > 0f)
+                d.z = 2f * mPrev.z * mCur.z / (mPrev.z + mCur.z);
+            return d;
+        }
+
         private void MatchGhostDrones()
         {
-            bool firstPass = ghostMatchAttempts == 0;
             var drones = FindObjectsOfType<GameObject>(true);
             System.Collections.Generic.List<GameObject> ghostList = new System.Collections.Generic.List<GameObject>();
             foreach (var go in drones)
@@ -8370,55 +8875,63 @@ public class GhostLinePoller : MonoBehaviour
             if (ghostList.Count == 0)
                 return;
 
-            if (firstPass)
-            {
-                Debug.Log($"[GhostLines] Found {ghostList.Count} candidate ghost drones");
-                foreach (var go in ghostList)
-                {
-                    System.Text.StringBuilder sb = new System.Text.StringBuilder();
-                    sb.Append("[GhostLines] Ghost " + go.name + " pos=" + go.transform.position + " comps:");
-                    foreach (var c in go.GetComponents<Component>())
-                        sb.Append(" " + c.GetType().Name);
-                    Debug.Log(sb.ToString());
-                }
-            }
-
             float rt;
             TryGetReplayTime(out rt);
             var matchedEntries = new System.Collections.Generic.HashSet<GhostLineEntry>(ghostDroneMap.Keys);
-
+            var availableDrones = new System.Collections.Generic.List<GameObject>();
             foreach (var go in ghostList)
             {
-                if (ghostDroneMap.ContainsValue(go.transform))
-                    continue;
+                if (!ghostDroneMap.ContainsValue(go.transform))
+                {
+                    // Suppress the native effect before a recording match exists.
+                    // A late or failed match must not leave a second, trailing
+                    // drone underneath the independently drawn marker.
+                    SuppressUnmatchedGhostTrails(go.transform);
+                    availableDrones.Add(go);
+                }
+            }
 
-                Vector3 dronePos = go.transform.position;
+            // Choose the globally closest entry/root pair each pass.  Matching
+            // roots in scene-enumeration order can steal a nearby pilot's drone
+            // and leave the final (often slowest) pilot with an un-suppressed
+            // native drone and trail.
+            while (availableDrones.Count > 0)
+            {
+                GameObject bestDrone = null;
                 GhostLineEntry bestEntry = null;
                 float bestDist = float.MaxValue;
-                foreach (var entry in GhostLinesPlugin.entries)
+                for (int di = 0; di < availableDrones.Count; di++)
                 {
-                    if (matchedEntries.Contains(entry))
-                        continue;
-                    Vector3 ePos; Quaternion eRot;
-                    if (TryGetDroneTransformUnshifted(entry, rt, out ePos, out eRot))
+                    GameObject go = availableDrones[di];
+                    Vector3 dronePos = go.transform.position;
+                    foreach (var entry in GhostLinesPlugin.entries)
                     {
+                        if (matchedEntries.Contains(entry))
+                            continue;
+                        Vector3 ePos; Quaternion eRot;
+                        if (!TryGetDroneTransformUnshifted(entry, rt, out ePos, out eRot))
+                            continue;
                         float d = Vector3.Distance(dronePos, ePos);
-                        if (d < bestDist) { bestDist = d; bestEntry = entry; }
+                        if (d < bestDist)
+                        {
+                            bestDist = d;
+                            bestDrone = go;
+                            bestEntry = entry;
+                        }
                     }
                 }
-                if (bestEntry != null && bestDist < 10f)
+
+                if (bestDrone == null || bestEntry == null || bestDist >= 20f)
                 {
-                    matchedEntries.Add(bestEntry);
-                    ghostDroneMap[bestEntry] = go.transform;
-                    ghostCamMountMap[bestEntry] = FindCameraMountTransform(go.transform);
-                    CacheGhostTrails(bestEntry, go.transform);
-                    SetGhostTrailsSuppressed(bestEntry, true);
-                    Debug.Log($"[GhostLines] Matched {go.name} -> {bestEntry.pilotName} d={bestDist:F3} camMount={(ghostCamMountMap[bestEntry] != null ? ghostCamMountMap[bestEntry].name : "NONE")}");
+                    break;
                 }
-                else if (bestEntry != null && firstPass)
-                {
-                    Debug.Log($"[GhostLines] Ghost drone {go.name} best dist {bestDist:F3} > 10, no match");
-                }
+
+                matchedEntries.Add(bestEntry);
+                ghostDroneMap[bestEntry] = bestDrone.transform;
+                ghostCamMountMap[bestEntry] = FindCameraMountTransform(bestDrone.transform);
+                CacheGhostTrails(bestEntry, bestDrone.transform);
+                SetGhostTrailsSuppressed(bestEntry, true);
+                availableDrones.Remove(bestDrone);
             }
         }
 
@@ -8428,16 +8941,55 @@ public class GhostLinePoller : MonoBehaviour
                 return false;
 
             string name = candidate.name;
-            bool namedDrone = name.IndexOf("Fixation", System.StringComparison.OrdinalIgnoreCase) >= 0
-                || name.IndexOf("Frame01", System.StringComparison.OrdinalIgnoreCase) >= 0;
-            if (!namedDrone)
+            string lowerName = name.ToLowerInvariant();
+            if (lowerName.Contains("door") || lowerName.Contains("gym") || lowerName.Contains("building")
+                || lowerName.Contains("wall") || lowerName.Contains("floor") || lowerName.Contains("ceiling")
+                || lowerName.Contains("gate") || lowerName.Contains("structure") || lowerName.Contains("environment")
+                || lowerName.Contains("track") || lowerName.Contains("scenery"))
+                return false;
+            // Drone frames vary widely (DquadFixationFrame01, FrameTalon...,
+            // custom frames, etc.).  Identify the shared hierarchy instead of
+            // relying on one frame name.  Environment props can also contain
+            // "Frame01", but do not have a Trail plus motor/battery/slot layout.
+            if (candidate.GetComponentsInChildren<TrailRenderer>(true).Length == 0)
+                return false;
+
+            int droneParts = 0;
+            bool hasCameraSlot = false;
+            bool hasMotor = false;
+            bool hasBattery = false;
+            bool hasLaunchBase = false;
+            bool hasColliders = false;
+            foreach (Transform child in candidate.GetComponentsInChildren<Transform>(true))
+            {
+                if (child == candidate) continue;
+                string childName = child.name.ToLowerInvariant();
+                if (childName.Contains("cameraslot") || childName.Contains("cameraparentpoint") || childName.Contains("fpvcam"))
+                    hasCameraSlot = true;
+                if (childName.Contains("motor"))
+                    hasMotor = true;
+                if (childName.Contains("battery"))
+                    hasBattery = true;
+                if (childName.Contains("launchbase"))
+                    hasLaunchBase = true;
+                if (childName.Contains("collider"))
+                    hasColliders = true;
+            }
+            if (hasCameraSlot) droneParts++;
+            if (hasMotor) droneParts++;
+            if (hasBattery) droneParts++;
+            if (hasLaunchBase) droneParts++;
+            if (hasColliders) droneParts++;
+            if (droneParts < 2)
                 return false;
 
             for (Transform parent = candidate.parent; parent != null; parent = parent.parent)
             {
                 string parentName = parent.name;
-                if (parentName.IndexOf("Fixation", System.StringComparison.OrdinalIgnoreCase) >= 0
-                    || parentName.IndexOf("Frame01", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                string lowerParentName = parentName.ToLowerInvariant();
+                if (lowerParentName.Contains("door") || lowerParentName.Contains("gym")
+                    || lowerParentName.Contains("building") || lowerParentName.Contains("environment")
+                    || lowerParentName.Contains("scenery"))
                     return false;
             }
             return true;
@@ -8447,15 +8999,12 @@ public class GhostLinePoller : MonoBehaviour
         {
             if (droneRoot == null) return null;
             var children = droneRoot.GetComponentsInChildren<Transform>(true);
-            System.Text.StringBuilder dump = new System.Text.StringBuilder();
-            dump.Append("[GhostLines] Child transforms under " + droneRoot.name + ":");
             Transform slotWithRot = null;
             Transform parentPoint = null;
             Transform cameraNano = null;
             foreach (var t in children)
             {
                 if (t == droneRoot) continue;
-                dump.Append(" " + t.name + ";");
                 string lname = t.name.ToLowerInvariant();
                 if (lname.Contains("redot") || lname.Contains("nano"))
                 {
@@ -8471,14 +9020,6 @@ public class GhostLinePoller : MonoBehaviour
                 }
             }
             Transform best = parentPoint ?? cameraNano ?? slotWithRot;
-            if (cameraMountLoggedRoots.Add(droneRoot))
-            {
-                Debug.Log(dump.ToString());
-                if (best != null)
-                    Debug.Log($"[GhostLines] Selected camera mount candidate: {best.name} (local rot={best.localRotation.eulerAngles})");
-                else
-                    Debug.Log($"[GhostLines] No camera mount transform found by keyword under {droneRoot.name}");
-            }
             return best;
         }
 
@@ -8553,43 +9094,79 @@ public class GhostLinePoller : MonoBehaviour
             float lapDur = Mathf.Max(0.001f, refEntry.finishTime > 0f ? refEntry.finishTime : times[last] - times[first]);
             float statesPerSec = span / lapDur;
 
-            float lastDelta = float.IsNaN(entry.lastDeltaShownValue) ? 0f : entry.lastDeltaShownValue;
-            float expectedLapTime = replayTime - lastDelta;
+            int win = Mathf.Max(48, (int)(statesPerSec * 8f));
+            float refDistNow = Mathf.Clamp(GetDistanceAlongPath(refEntry, replayTime), dists[first], dists[last]);
+            float entryDistNow = entry.pathDistances != null && entry.pathDistances.Length > 0
+                ? GetDistanceAlongPath(entry, replayTime)
+                : 0f;
+            float entryRaceDist = Mathf.Max(0f, entryDistNow - entry.lapStartDistance);
+            float odAnchorDist = Mathf.Clamp(refEntry.lapStartDistance + entryRaceDist, dists[first], dists[last]);
+            float refFinishTime = refEntry.finishTime > 0f
+                ? refEntry.finishTime
+                : (times[last] - GetGateTimestamp(refEntry));
+            bool refFinished = refFinishTime > 0f && replayTime > refFinishTime + 0.001f;
 
-            bool continuous = entry.lastDeltaRefPath == refEntry.pathDistances
-                && entry.lastDeltaRefIndex >= first && entry.lastDeltaRefIndex <= last
-                && !float.IsNaN(entry.lastDeltaReplayTime)
-                && Mathf.Abs(replayTime - entry.lastDeltaReplayTime) <= 2.5f;
-
-            int center;
-            int win;
-            float tolerance;
-            if (continuous)
+            // A previous match is useful only as a tie breaker at an intersection.
+            // Do not turn it into the search anchor: a bad match must be able to
+            // recover immediately when its geometry no longer fits.
+            bool hasContinuity = !float.IsNaN(entry.lastRefMatchDist)
+                && !float.IsNaN(entry.lastRefMatchReplayTime)
+                && replayTime >= entry.lastRefMatchReplayTime - 0.02f
+                && replayTime - entry.lastRefMatchReplayTime <= 0.25f;
+            if (!float.IsNaN(entry.lastRefMatchReplayTime) && replayTime < entry.lastRefMatchReplayTime - 0.02f)
             {
-                center = entry.lastDeltaRefIndex;
-                float dtReplay = Mathf.Abs(replayTime - entry.lastDeltaReplayTime);
-                win = Mathf.Max(96, (int)(statesPerSec * (dtReplay * 4f + 1.5f)));
-                tolerance = 0.05f;
+                entry.lastRefMatchDist = float.NaN;
+                entry.lastRefMatchReplayTime = float.NaN;
             }
-            else
+            float preferredRaceTime = replayTime;
+            if (hasContinuity)
             {
-                float anchorRefDist = refEntry.lapStartDistance;
-                if (entry.pathDistances != null && entry.pathDistances.Length > 0 && entry.lapTotalDistance > 0f)
-                {
-                    float entryDistNow = GetDistanceAlongPath(entry, replayTime);
-                    anchorRefDist += Mathf.Max(0f, entryDistNow - entry.lapStartDistance);
-                }
-                int lo = first, hi = last;
-                while (lo < hi)
-                {
-                    int mid = (lo + hi) / 2;
-                    if (dists[mid] < anchorRefDist) lo = mid + 1; else hi = mid;
-                }
-                center = Mathf.Clamp(lo, first, last);
-                win = Mathf.Max(96, span / 8 + (int)(Mathf.Abs(lastDelta) * statesPerSec));
-                tolerance = 0.5f;
+                float previousRaceTime = GetTimeAtDistance(refEntry, entry.lastRefMatchDist) - refEntry.lapStartOffset;
+                preferredRaceTime = previousRaceTime + (replayTime - entry.lastRefMatchReplayTime);
             }
 
+            Vector3 entryTangent;
+            bool hasEntryTangent = TryGetPathTangentAtReplayTime(entry, replayTime, out entryTangent);
+
+            // Once the reference has finished, its current path distance is pinned
+            // at the finish line. Anchor to the other pilot's lap distance instead,
+            // otherwise every slower pilot would be matched against the finish
+            // section and its delta would appear frozen.
+            float primaryAnchorDist = refFinished ? odAnchorDist : refDistNow;
+            if (refFinished)
+                preferredRaceTime = GetTimeAtDistance(refEntry, primaryAnchorDist) - refEntry.lapStartOffset;
+
+            if (TryRefWindowMatch(refEntry, dists, times, positions, first, last, win, pos,
+                primaryAnchorDist, preferredRaceTime, hasEntryTangent ? entryTangent : Vector3.zero, out refDist))
+            {
+                entry.lastRefMatchDist = refDist;
+                entry.lastRefMatchReplayTime = replayTime;
+                return true;
+            }
+
+            if (TryRefWindowMatch(refEntry, dists, times, positions, first, last, win, pos,
+                odAnchorDist, replayTime, hasEntryTangent ? entryTangent : Vector3.zero, out refDist))
+            {
+                entry.lastRefMatchDist = refDist;
+                entry.lastRefMatchReplayTime = replayTime;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryRefWindowMatch(GhostLineEntry refEntry, float[] dists, float[] times, Vector3[] positions,
+            int first, int last, int win, Vector3 pos, float centerDist,
+            float preferredRaceTime, Vector3 entryTangent, out float refDist)
+        {
+            refDist = 0f;
+            int loC = first, hiC = last;
+            while (loC < hiC)
+            {
+                int mid = (loC + hiC) / 2;
+                if (dists[mid] < centerDist) loC = mid + 1; else hiC = mid;
+            }
+            int center = loC;
             int segLo = Mathf.Max(first, center - win);
             int segHi = Mathf.Min(last - 1, center + win);
             if (segHi < segLo)
@@ -8598,6 +9175,7 @@ public class GhostLinePoller : MonoBehaviour
             float best = float.MaxValue;
             float bestT = 0f;
             int bestSeg = segLo;
+            bool found = false;
             for (int i = segLo; i <= segHi; i++)
             {
                 Vector3 a = positions[i];
@@ -8617,17 +9195,51 @@ public class GhostLinePoller : MonoBehaviour
                     distSqr = (a + ab * t - pos).sqrMagnitude;
                 }
                 float tAbs = times[i] + t * (times[i + 1] - times[i]);
-                float lapTimeAtPoint = tAbs - times[first];
-                float temporalErr = Mathf.Max(0f, Mathf.Abs(lapTimeAtPoint - expectedLapTime) - tolerance);
-                float score = distSqr + temporalErr * temporalErr * 400f;
-                if (score < best) { best = score; bestSeg = i; bestT = t; }
-            }
+                float raceTimeAtPoint = tAbs - GetGateTimestamp(refEntry);
+                float temporalErr = Mathf.Abs(raceTimeAtPoint - preferredRaceTime);
 
-            entry.lastDeltaRefPath = refEntry.pathDistances;
-            entry.lastDeltaRefIndex = bestSeg;
-            entry.lastDeltaReplayTime = replayTime;
+                // Geometry is the primary answer.  Time continuity is deliberately
+                // capped so it settles adjacent 10 Hz candidates without dragging a
+                // match onto a nearby future track strand.  Flight direction breaks
+                // the otherwise ambiguous case where a course crosses itself.
+                float temporalScore = Mathf.Min(temporalErr * temporalErr * 150f, 4f);
+                float directionScore = 0f;
+                if (entryTangent.sqrMagnitude > 0.0001f && lenSqr > 1e-12f)
+                {
+                    float alignment = Vector3.Dot(entryTangent, ab.normalized);
+                    directionScore = (1f - alignment) * 12f;
+                }
+                float score = distSqr + temporalScore + directionScore;
+                if (score < best) { best = score; bestSeg = i; bestT = t; found = true; }
+            }
+            if (!found)
+                return false;
 
             refDist = dists[bestSeg] + bestT * (dists[bestSeg + 1] - dists[bestSeg]);
+            return true;
+        }
+
+        private static bool TryGetPathTangentAtReplayTime(GhostLineEntry entry, float replayTime, out Vector3 tangent)
+        {
+            tangent = Vector3.zero;
+            if (entry == null || entry.stateTimes == null || entry.originalPositions == null || entry.stateTimes.Length < 2
+                || entry.stateTimes.Length != entry.originalPositions.Length)
+                return false;
+
+            float queryTime = GetGateQueryTimestamp(entry, replayTime);
+            float before = Mathf.Max(entry.stateTimes[0], queryTime - 0.075f);
+            float after = Mathf.Min(entry.stateTimes[entry.stateTimes.Length - 1], queryTime + 0.075f);
+            if (after - before < 0.01f)
+                return false;
+
+            tangent = SampleInterpolatedPosition(entry.stateTimes, entry.originalPositions, after)
+                - SampleInterpolatedPosition(entry.stateTimes, entry.originalPositions, before);
+            if (tangent.sqrMagnitude < 0.0001f)
+            {
+                tangent = Vector3.zero;
+                return false;
+            }
+            tangent.Normalize();
             return true;
         }
 
@@ -8703,11 +9315,38 @@ public class GhostLinePoller : MonoBehaviour
             UpdateOverlayResolution();
             currentPlaybackOverlayRectValid = false;
             currentStickCamOverlayRectValid = false;
-            DrawStickCam();
-            DrawStickGraph();
-            DrawBottomScrubber();
-            DrawSettingsPanel();
-            DrawBindingsWindow();
+            ComputeStickCamOverlayRect();
+            ComputePlaybackOverlayRect();
+            bool frontGraph = uiFrontLayer == UI_LAYER_STICKGRAPH;
+            bool frontSettings = uiFrontLayer == UI_LAYER_SETTINGS;
+            bool frontBindings = uiFrontLayer == UI_LAYER_BINDINGS;
+            bool frontPip = uiFrontLayer == UI_LAYER_PIP;
+            bool frontStickCam = uiFrontLayer == UI_LAYER_STICKCAM;
+            bool frontPlaybar = uiFrontLayer == UI_LAYER_PLAYBAR;
+            if (!frontGraph)
+                DrawStickGraph();
+            if (!frontSettings)
+                DrawSettingsPanel();
+            if (!frontBindings)
+                DrawBindingsWindow();
+            if (!frontPip && pipEnabled)
+                DrawPiPWindows();
+            if (!frontStickCam)
+                DrawStickCam();
+            if (!frontPlaybar)
+                DrawBottomScrubber();
+            if (frontGraph)
+                DrawStickGraph();
+            if (frontSettings)
+                DrawSettingsPanel();
+            if (frontBindings)
+                DrawBindingsWindow();
+            if (frontPip && pipEnabled)
+                DrawPiPWindows();
+            if (frontStickCam)
+                DrawStickCam();
+            if (frontPlaybar)
+                DrawBottomScrubber();
             HandleDroneLabelClick();
             GUI.color = Color.white;
         }
@@ -8759,26 +9398,1150 @@ public class GhostLinePoller : MonoBehaviour
             }
         }
 
+        private class PiPWindow
+        {
+            public GhostLineEntry entry;
+            public Rect rect;
+            public GameObject camObject;
+            public Camera cam;
+            public RenderTexture rt;
+            public int rtW = -1;
+            public int rtH = -1;
+            public bool rtDirty = false;
+            public bool dragging = false;
+            public bool dragCandidate = false;
+            public Vector2 dragStartMouse;
+            public Vector2 dragOffset;
+            public bool dropdownOpen = false;
+            public bool resizing = false;
+            public int resizeEdge = 0;
+            public int edgeHover = 0;
+            public float fadeAmount = 1f;
+            public bool pinned = false;
+            public Vector2 resizeStartMouse;
+            public Rect resizeStartRect;
+            public float nextRenderAt = 0f;
+        }
+
+        private string GetPilotLabel(GhostLineEntry entry, int fallbackIndex)
+        {
+            if (entry != null && !string.IsNullOrEmpty(entry.pilotName))
+                return entry.pilotName;
+            if (fallbackIndex >= 0)
+                return "Pilot " + (fallbackIndex + 1);
+            return "Pilot";
+        }
+
+        private void SetPipEnabled(bool enabled)
+        {
+            if (pipEnabled == enabled)
+                return;
+            pipEnabled = enabled;
+            if (pipEnabledConfig != null)
+            {
+                pipEnabledConfig.Value = enabled;
+                preferencesConfig?.Save();
+            }
+            if (!pipEnabled)
+                CloseAllPiPWindows();
+        }
+
+        private int GetEffectivePipRefreshHz(int windowCount)
+        {
+            if (pipRefreshAuto)
+            {
+                if (windowCount >= 3)
+                    return 15;
+                if (windowCount == 2)
+                    return 30;
+                return 60;
+            }
+            return pipRefreshHz > 0 ? pipRefreshHz : 30;
+        }
+
+        private void SetPipRefreshHz(int hz)
+        {
+            pipRefreshHz = hz;
+            pipRefreshAuto = false;
+            if (pipRefreshHzConfig != null)
+            {
+                pipRefreshHzConfig.Value = hz;
+                preferencesConfig?.Save();
+            }
+            if (pipRefreshAutoConfig != null)
+            {
+                pipRefreshAutoConfig.Value = false;
+                preferencesConfig?.Save();
+            }
+        }
+
+        private void SetPipRefreshAuto(bool enabled)
+        {
+            pipRefreshAuto = enabled;
+            if (pipRefreshAutoConfig != null)
+            {
+                pipRefreshAutoConfig.Value = enabled;
+                preferencesConfig?.Save();
+            }
+        }
+
+        private void ApplyPipFarClipFromSliderX(float mouseX, Rect track)
+        {
+            float t = Mathf.Clamp01((mouseX - track.x) / track.width);
+            float meters = Mathf.Clamp(Mathf.Round((25f + t * 225f) / 5f) * 5f, 25f, 250f);
+            if (pipFarClip == meters)
+                return;
+            pipFarClip = meters;
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                if (pipWindows[i].cam != null)
+                    pipWindows[i].cam.farClipPlane = meters;
+                pipWindows[i].rtDirty = true;
+            }
+        }
+
+        private void SavePipFarClip()
+        {
+            if (pipFarClipConfig != null)
+            {
+                pipFarClipConfig.Value = pipFarClip;
+                preferencesConfig?.Save();
+            }
+        }
+
+        private void SetPipResolutionScale(float scale)
+        {
+            pipResolutionScale = scale;
+            if (pipResolutionScaleConfig != null)
+            {
+                pipResolutionScaleConfig.Value = scale;
+                preferencesConfig?.Save();
+            }
+            for (int i = 0; i < pipWindows.Count; i++)
+                pipWindows[i].rtDirty = true;
+        }
+
+        private void TogglePiPWindow(GhostLineEntry entry)
+        {
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                if (pipWindows[i].entry == entry)
+                {
+                    ClosePiPWindow(pipWindows[i]);
+                    return;
+                }
+            }
+            OpenPiPWindow(entry);
+        }
+
+        private void OpenPiPWindow(GhostLineEntry entry)
+        {
+            if (!pipEnabled)
+                SetPipEnabled(true);
+            int cascade = pipWindows.Count % 5;
+            OpenPiPWindow(entry, new Rect(
+                Screen.width * 0.5f - 160f + cascade * PIP_OPEN_OFFSET,
+                Screen.height * 0.5f - 100f + cascade * PIP_OPEN_OFFSET,
+                320f, 200f));
+        }
+
+        private PiPWindow OpenPiPWindow(GhostLineEntry entry, Rect rect)
+        {
+            if (entry == null)
+                return null;
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                if (pipWindows[i].entry == entry)
+                    return null;
+            }
+            PiPWindow w = new PiPWindow();
+            w.entry = entry;
+            w.rect = rect;
+            w.fadeAmount = 1f;
+            ClampPiPWindowRect(w);
+            SyncPiPCameraSettings();
+            CreatePiPCamera(w);
+            EnsurePiPRenderTexture(w);
+            RenderPiPWindow(w);
+            float pipInterval = 1f / GetEffectivePipRefreshHz(pipWindows.Count + 1);
+            w.nextRenderAt = Time.unscaledTime + pipInterval + pipInterval * (float)(pipWindows.Count % 4) / 4f;
+            pipWindows.Add(w);
+            Debug.Log("[GhostLines] PIP window opened for " + GetPilotLabel(entry, 0));
+            return w;
+        }
+
+        private void SyncPiPCameraSettings()
+        {
+            Camera main = Camera.main;
+            if (main == null)
+                return;
+            if (holdZoomFovCaptured)
+                pipFov = holdZoomNormalFov;
+            else
+                pipFov = main.fieldOfView;
+            pipNearClip = main.nearClipPlane;
+        }
+
+        private void CreatePiPCamera(PiPWindow w)
+        {
+            if (w.camObject != null)
+                return;
+            w.camObject = new GameObject("GhostLinesPiPCamera");
+            w.camObject.transform.position = Vector3.zero;
+            w.cam = w.camObject.AddComponent<Camera>();
+            w.cam.enabled = false;
+            w.cam.targetTexture = null;
+            Camera main = Camera.main;
+            w.cam.clearFlags = main != null ? main.clearFlags : CameraClearFlags.SolidColor;
+            w.cam.backgroundColor = main != null ? main.backgroundColor : new Color(0.02f, 0.02f, 0.03f);
+            w.cam.fieldOfView = pipFov;
+            w.cam.nearClipPlane = pipNearClip;
+            w.cam.farClipPlane = pipFarClip;
+            w.cam.cullingMask = GetPiPCullingMask();
+            w.cam.renderingPath = RenderingPath.Forward;
+            w.cam.allowHDR = false;
+            w.cam.allowMSAA = false;
+            w.cam.depth = -1000f;
+        }
+
+        private int GetPiPCullingMask()
+        {
+            Camera main = Camera.main;
+            int mask = main != null ? main.cullingMask : -1;
+            mask &= ~(1 << 5);
+            if (!pipCullingMaskLogged)
+            {
+                pipCullingMaskLogged = true;
+                Debug.Log("[GhostLines] PIP culling mask 0x" + mask.ToString("X8") + " (UI layer excluded)");
+            }
+            return mask;
+        }
+
+        private void EnsurePiPRenderTexture(PiPWindow w)
+        {
+            Rect content = GetPiPContentRect(w.rect);
+            float targetW = content.width * pipResolutionScale;
+            float targetH = content.height * pipResolutionScale;
+            float fit = Mathf.Min(1f, Mathf.Min(PIP_RT_MAX_WIDTH / targetW, PIP_RT_MAX_HEIGHT / targetH));
+            int newW = Mathf.Clamp(Mathf.RoundToInt(targetW * fit), 48, (int)PIP_RT_MAX_WIDTH);
+            int newH = Mathf.Clamp(Mathf.RoundToInt(targetH * fit), 48, (int)PIP_RT_MAX_HEIGHT);
+            if (w.rt != null && Mathf.Abs(w.rtW - newW) <= PIP_RT_RECREATE_TOLERANCE && Mathf.Abs(w.rtH - newH) <= PIP_RT_RECREATE_TOLERANCE)
+                return;
+            if (w.rt != null)
+            {
+                w.rt.Release();
+                Destroy(w.rt);
+                w.rt = null;
+            }
+            w.rtW = newW;
+            w.rtH = newH;
+            w.rt = new RenderTexture(newW, newH, 16, RenderTextureFormat.Default);
+            w.rt.name = "GhostLinesPiPRT";
+            if (w.cam != null)
+                w.cam.targetTexture = w.rt;
+        }
+
+        private void ClosePiPWindow(PiPWindow w)
+        {
+            if (w.camObject != null)
+            {
+                Destroy(w.camObject);
+                w.camObject = null;
+            }
+            w.cam = null;
+            if (w.rt != null)
+            {
+                w.rt.Release();
+                Destroy(w.rt);
+                w.rt = null;
+            }
+            pipWindows.Remove(w);
+        }
+
+        private void CloseAllPiPWindows()
+        {
+            for (int i = pipWindows.Count - 1; i >= 0; i--)
+                ClosePiPWindow(pipWindows[i]);
+        }
+
+        private void TickPiPWindows()
+        {
+            float now = Time.unscaledTime;
+            float interval = 1f / GetEffectivePipRefreshHz(pipWindows.Count);
+            if (pipStepTargetTime >= 0f)
+            {
+                float applied;
+                bool settled = TryGetReplayTime(out applied) && Mathf.Abs(applied - pipStepTargetTime) <= 0.002f;
+                if (settled || Time.frameCount >= pipForceRenderFrame)
+                {
+                    pipStepTargetTime = -1f;
+                    pipForceRenderFrame = -1;
+                }
+            }
+            for (int i = pipWindows.Count - 1; i >= 0; i--)
+            {
+                PiPWindow w = pipWindows[i];
+                if (w.entry == null || !GhostLinesPlugin.entries.Contains(w.entry))
+                {
+                    ClosePiPWindow(w);
+                    continue;
+                }
+                if (w.fadeAmount < 0.01f)
+                {
+                    w.rtDirty = true;
+                    w.nextRenderAt = 0f;
+                    continue;
+                }
+                if (w.rtDirty && pipForceRenderFrame < 0)
+                {
+                    EnsurePiPRenderTexture(w);
+                    w.rtDirty = false;
+                    RenderPiPWindow(w);
+                    w.nextRenderAt = now + interval;
+                }
+                if (!isPlaying && !draggingScrubber && !isDraggingHandle && !draggingTrimStart && !draggingTrimEnd)
+                    continue;
+                if (now < w.nextRenderAt)
+                    continue;
+                EnsurePiPRenderTexture(w);
+                RenderPiPWindow(w);
+                w.nextRenderAt = now + interval;
+            }
+        }
+
+        private bool IsPlaybackTrimHit(Vector2 mouse)
+        {
+            if (!trimEnabled || !currentPlaybackOverlayRectValid)
+                return false;
+            float s = playbackUiSize;
+            float barH = 56f * s;
+            float barW = (Screen.width / 3f) * s;
+            float barX = scrubberX - barW * 0.5f;
+            float barY = scrubberY - barH * 0.5f;
+            float min = 0f;
+            float max = 1f;
+            if (replayController != null && timeProp != null)
+            {
+                var maxProp = GetControllerMaxTimeProp();
+                if (maxProp != null)
+                    max = (float)maxProp.GetValue(replayController, null);
+            }
+            else if (sliderComponent != null && sliderValueProp != null)
+            {
+                var minProp = GetSliderMinValueProp();
+                var maxProp = GetSliderMaxValueProp();
+                if (minProp != null) min = (float)minProp.GetValue(sliderComponent, null);
+                if (maxProp != null) max = (float)maxProp.GetValue(sliderComponent, null);
+            }
+            max = GetEffectiveReplayEnd(max);
+            float labelW = Mathf.Max(55f * s, 54f);
+            float labelInset = Mathf.Max(6f * s, 6f);
+            float row1Y = barY + Mathf.Max(2f * s, 2f);
+            Rect sliderRect = new Rect(
+                barX + labelW + labelInset,
+                row1Y,
+                barW - labelW * 2f - labelInset * 2f,
+                Mathf.Max(18f * s, 18f));
+            float thandleW = 12f * s;
+            float ttX = sliderRect.x + thandleW * 0.5f;
+            float ttW = sliderRect.width - thandleW;
+            float trange = Mathf.Max(max - min, 0.0001f);
+            float tsN = Mathf.Clamp01((trimStart - min) / trange);
+            float teN = Mathf.Clamp01((trimEnd - min) / trange);
+            float tsX = ttX + tsN * ttW;
+            float teX = ttX + teN * ttW;
+            float poleH = 20f * s;
+            float poleTop = sliderRect.y + (sliderRect.height - poleH) * 0.5f;
+            float flagW = 14f * s;
+            float flagOverlap = 4f * s;
+            float flagTop = barY - 13f * s;
+            float hitPad = 2f * s;
+            float hitY = flagTop - hitPad;
+            float hitH = (poleTop + poleH) - flagTop + hitPad * 2f;
+            float sMinX = tsX - flagW - hitPad;
+            if (new Rect(sMinX, hitY, tsX + hitPad - sMinX, hitH).Contains(mouse))
+                return true;
+            float eMinX = teX - hitPad;
+            if (new Rect(eMinX, hitY, teX + flagW + hitPad - eMinX, hitH).Contains(mouse))
+                return true;
+            return false;
+        }
+
+        private void HandleOverlayResizeMouse()
+        {
+            Vector2 mouse = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+            bool leftDown = Input.GetMouseButtonDown(0);
+            bool leftHeld = Input.GetMouseButton(0);
+            bool leftUp = Input.GetMouseButtonUp(0);
+
+            if (currentStickCamOverlayRectValid)
+            {
+                if (!stickCamResizing)
+                {
+                    stickCamEdgeHover = GetOverlayHoverEdge(currentStickCamOverlayRect, mouse);
+                    if ((stickCamEdgeHover & PIP_EDGE_RIGHT) == 0 || (stickCamEdgeHover & (PIP_EDGE_TOP | PIP_EDGE_BOTTOM)) == 0)
+                        stickCamEdgeHover = 0;
+                }
+                bool stickBlocked = IsUiBlockedFor(UI_LAYER_STICKCAM, mouse);
+                if (stickCamResizing && !leftHeld && !leftDown && !leftUp)
+                {
+                    stickCamResizing = false;
+                    stickCamResizeEdge = 0;
+                }
+                if (leftDown && !stickCamResizing && stickCamEdgeHover != 0 && !stickBlocked)
+                {
+                    uiFrontLayer = UI_LAYER_STICKCAM;
+                    draggingStickCam = false;
+                    stickCamResizing = true;
+                    stickCamResizeEdge = stickCamEdgeHover;
+                    stickCamResizeStartScale = stickCamSize;
+                    stickCamResizeStartMouse = mouse;
+                }
+                if (stickCamResizing)
+                {
+                    if (leftUp)
+                    {
+                        stickCamResizing = false;
+                        stickCamResizeEdge = 0;
+                        SaveCurrentOverlayPositions();
+                        SaveDisplayPreferences();
+                    }
+                    else if (leftHeld)
+                    {
+                        float start = stickCamResizeStartScale;
+                        float b0 = Mathf.Clamp(Screen.height * 0.11f, 68f, 96f);
+                        float s0w = start * (2f * b0 + 14f) + 10f;
+                        float s0h = start * b0 + 10f;
+                        float ax = stickCamX - s0w * 0.5f;
+                        bool topGrab = (stickCamResizeEdge & PIP_EDGE_TOP) != 0;
+                        float ay = topGrab ? stickCamY + s0h * 0.5f : stickCamY - s0h * 0.5f;
+                        float fx = (Mathf.Abs(mouse.x - ax) - 10f) / (2f * b0 + 14f);
+                        float fy = (Mathf.Abs(mouse.y - ay) - 10f) / b0;
+                        stickCamSize = Mathf.Clamp(Mathf.Max(fx, fy), 0.5f, 1.8f);
+                    }
+                }
+            }
+
+            if (currentPlaybackOverlayRectValid)
+            {
+                if (!playbackResizing)
+                {
+                    playbackEdgeHover = GetOverlayHoverEdge(currentPlaybackOverlayRect, mouse);
+                    if (playbackEdgeHover != 0 && IsPlaybackTrimHit(mouse))
+                        playbackEdgeHover = 0;
+                }
+                bool playbackBlocked = IsUiBlockedFor(UI_LAYER_PLAYBAR, mouse);
+                if (playbackResizing && !leftHeld && !leftDown && !leftUp)
+                {
+                    playbackResizing = false;
+                    playbackResizeEdge = 0;
+                }
+                if (leftDown && !playbackResizing && playbackEdgeHover != 0 && !playbackBlocked)
+                {
+                    uiFrontLayer = UI_LAYER_PLAYBAR;
+                    draggingScrubber = false;
+                    playbackResizing = true;
+                    playbackResizeEdge = playbackEdgeHover;
+                    playbackResizeStartScale = playbackUiSize;
+                    playbackResizeStartMouse = mouse;
+                }
+                if (playbackResizing)
+                {
+                    if (leftUp)
+                    {
+                        playbackResizing = false;
+                        playbackResizeEdge = 0;
+                        SaveCurrentOverlayPositions();
+                        SaveDisplayPreferences();
+                    }
+                    else if (leftHeld)
+                    {
+                        float start = playbackResizeStartScale;
+                        float s0w = start * (Screen.width / 3f + 10f);
+                        float s0h = start * 66f;
+                        bool rightGrab = (playbackResizeEdge & PIP_EDGE_RIGHT) != 0;
+                        bool topGrab = (playbackResizeEdge & PIP_EDGE_TOP) != 0;
+                        float ax = rightGrab ? scrubberX - s0w * 0.5f : scrubberX + s0w * 0.5f;
+                        float ay = topGrab ? scrubberY + s0h * 0.5f : scrubberY - s0h * 0.5f;
+                        float fx = Mathf.Abs(mouse.x - ax) / (Screen.width / 3f + 10f);
+                        float fy = Mathf.Abs(mouse.y - ay) / 66f;
+                        playbackUiSize = Mathf.Clamp(Mathf.Max(fx, fy), 0.6f, 1.6f);
+                    }
+                }
+            }
+        }
+
+        private void HandlePiPWindowMouse()
+        {
+            if (pipWindows.Count == 0)
+                return;
+            Vector2 mouse = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+            bool leftDown = Input.GetMouseButtonDown(0);
+            bool leftHeld = Input.GetMouseButton(0);
+            bool leftUp = Input.GetMouseButtonUp(0);
+            bool pipDropdownAnyOpen = false;
+            for (int j = 0; j < pipWindows.Count; j++)
+            {
+                if (pipWindows[j].dropdownOpen)
+                {
+                    pipDropdownAnyOpen = true;
+                    break;
+                }
+            }
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                PiPWindow w = pipWindows[i];
+                if (w.entry == null)
+                    continue;
+                if (w.fadeAmount < 0.01f)
+                    continue;
+                Rect panel = w.rect;
+                Rect closeBtn = new Rect(panel.xMax - 24f, panel.y + 3f, 18f, 18f);
+                Rect pilotBtn = GetPiPPilotBtnRect(panel);
+                Rect pinBtn = new Rect(panel.xMax - 72f, panel.y + 3f, 18f, 18f);
+                Rect plusBtn = new Rect(panel.xMax - 48f, panel.y + 3f, 18f, 18f);
+                bool covered = false;
+                for (int j = i + 1; j < pipWindows.Count; j++)
+                {
+                    if (pipWindows[j].entry != null && pipWindows[j].fadeAmount > 0.01f && pipWindows[j].rect.Contains(mouse))
+                    {
+                        covered = true;
+                        break;
+                    }
+                }
+                w.edgeHover = GetPiPHoverEdge(w, mouse, closeBtn, covered);
+
+                if (leftDown && pilotBtn.Contains(mouse) && !covered)
+                {
+                    uiFrontLayer = UI_LAYER_PIP;
+                    pipActivated = w;
+                    w.dragCandidate = false;
+                    w.dragging = false;
+                    w.dropdownOpen = !w.dropdownOpen;
+                    if (w.dropdownOpen)
+                    {
+                        for (int j = 0; j < pipWindows.Count; j++)
+                        {
+                            if (pipWindows[j] != w)
+                                pipWindows[j].dropdownOpen = false;
+                        }
+                    }
+                    continue;
+                }
+
+                if (leftDown && !IsUiBlockedFor(UI_LAYER_PIP, mouse))
+                {
+                    uiFrontLayer = UI_LAYER_PIP;
+                    if (!covered && closeBtn.Contains(mouse))
+                    {
+                        ClosePiPWindow(w);
+                        i--;
+                        continue;
+                    }
+                    if (pipDropdownAnyOpen)
+                    {
+                        if (w.dropdownOpen)
+                        {
+                            if (GetPiPDropdownRect(w).Contains(mouse))
+                                continue;
+                            w.dropdownOpen = false;
+                        }
+                        continue;
+                    }
+                    if (!covered && plusBtn.Contains(mouse))
+                    {
+                        w.dropdownOpen = false;
+                        GhostLineEntry next = GetPiPNextUnshownPilot();
+                        if (next != null)
+                        {
+                            PiPWindow spawned = OpenPiPWindow(next, new Rect(w.rect.x + PIP_OPEN_OFFSET, w.rect.y + PIP_OPEN_OFFSET, w.rect.width, w.rect.height));
+                            if (spawned != null)
+                                pipActivated = spawned;
+                        }
+                        continue;
+                    }
+                    if (w.dropdownOpen && GetPiPDropdownRect(w).Contains(mouse))
+                        continue;
+                    if (w.edgeHover != 0)
+                    {
+                        w.resizing = true;
+                        w.resizeEdge = w.edgeHover;
+                        w.resizeStartMouse = mouse;
+                        w.resizeStartRect = w.rect;
+                        w.dragCandidate = false;
+                        w.dragging = false;
+                        pipActivated = w;
+                        continue;
+                    }
+                    w.dragCandidate = !w.resizing && !covered && panel.Contains(mouse) && !pinBtn.Contains(mouse) && !plusBtn.Contains(mouse) && !pilotBtn.Contains(mouse) && !closeBtn.Contains(mouse);
+                    w.dragStartMouse = mouse;
+                    w.dragging = false;
+                    if (w.dragCandidate)
+                        pipActivated = w;
+                }
+                else if (leftHeld)
+                {
+                    if (w.dragCandidate && !w.dragging && (mouse - w.dragStartMouse).sqrMagnitude > 36f)
+                    {
+                        w.dragging = true;
+                        w.dragOffset = mouse - new Vector2(panel.x, panel.y);
+                    }
+                    if (w.dragging)
+                    {
+                        w.rect.x = mouse.x - w.dragOffset.x;
+                        w.rect.y = mouse.y - w.dragOffset.y;
+                        ClampPiPWindowRect(w);
+                    }
+                    if (w.resizing)
+                    {
+                        float dx = mouse.x - w.resizeStartMouse.x;
+                        float dy = mouse.y - w.resizeStartMouse.y;
+                        bool leftE = (w.resizeEdge & PIP_EDGE_LEFT) != 0;
+                        bool topE = (w.resizeEdge & PIP_EDGE_TOP) != 0;
+                        bool rightE = (w.resizeEdge & PIP_EDGE_RIGHT) != 0;
+                        bool bottomE = (w.resizeEdge & PIP_EDGE_BOTTOM) != 0;
+                        bool corner = (leftE || rightE) && (topE || bottomE);
+                        float newX = w.resizeStartRect.x;
+                        float newY = w.resizeStartRect.y;
+                        float newW = w.resizeStartRect.width;
+                        float newH = w.resizeStartRect.height;
+                        float maxW = Mathf.Max(PIP_MIN_WIDTH, Screen.width - 24f);
+                        float maxH = Mathf.Max(PIP_MIN_HEIGHT, Screen.height - 24f);
+                        float sx;
+                        float sy;
+                        if (corner)
+                        {
+                            sx = leftE ? -dx : dx;
+                            sy = topE ? -dy : dy;
+                        }
+                        else if (leftE || rightE)
+                        {
+                            sx = leftE ? -dx : dx;
+                            sy = sx;
+                        }
+                        else
+                        {
+                            sy = topE ? -dy : dy;
+                            sx = sy;
+                        }
+                        float fw = newW > 0f ? 1f + sx / newW : 1f;
+                        float fh = newH > 0f ? 1f + sy / newH : 1f;
+                        float f = Mathf.Max(fw, fh);
+                        float minFactor = Mathf.Max(PIP_MIN_WIDTH / newW, PIP_MIN_HEIGHT / newH);
+                        f = Mathf.Max(f, minFactor);
+                        f = Mathf.Min(f, maxW / newW, maxH / newH);
+                        newW = newW * f;
+                        newH = newH * f;
+                        if (leftE)
+                            newX = w.resizeStartRect.x + (w.resizeStartRect.width - newW);
+                        if (topE)
+                            newY = w.resizeStartRect.y + (w.resizeStartRect.height - newH);
+                        if (!corner && (leftE || rightE))
+                            newY = w.resizeStartRect.y + (w.resizeStartRect.height - newH) * 0.5f;
+                        else if (!corner)
+                            newX = w.resizeStartRect.x + (w.resizeStartRect.width - newW) * 0.5f;
+                        w.rect.x = newX;
+                        w.rect.y = newY;
+                        w.rect.width = newW;
+                        w.rect.height = newH;
+                        ClampPiPWindowRect(w);
+                        w.rtDirty = true;
+                    }
+                }
+                else if (leftUp)
+                {
+                    w.dragCandidate = false;
+                    w.dragging = false;
+                    if (w.resizing)
+                    {
+                        w.resizing = false;
+                        w.resizeEdge = 0;
+                        w.rtDirty = true;
+                    }
+                }
+            }
+        }
+
+        private int GetOverlayHoverEdge(Rect panel, Vector2 mouse)
+        {
+            float cornerT = PIP_RESIZE_GRAB;
+            Rect cornerTL = new Rect(panel.x, panel.y, cornerT, cornerT);
+            Rect cornerTR = new Rect(panel.xMax - cornerT, panel.y, cornerT, cornerT);
+            Rect cornerBL = new Rect(panel.x, panel.yMax - cornerT, cornerT, cornerT);
+            Rect cornerBR = new Rect(panel.xMax - cornerT, panel.yMax - cornerT, cornerT, cornerT);
+            int hover = 0;
+            if (cornerTL.Contains(mouse))
+                hover = PIP_EDGE_LEFT | PIP_EDGE_TOP;
+            else if (cornerTR.Contains(mouse))
+                hover = PIP_EDGE_RIGHT | PIP_EDGE_TOP;
+            else if (cornerBL.Contains(mouse))
+                hover = PIP_EDGE_LEFT | PIP_EDGE_BOTTOM;
+            else if (cornerBR.Contains(mouse))
+                hover = PIP_EDGE_RIGHT | PIP_EDGE_BOTTOM;
+            else
+            {
+                float edgeT = PIP_EDGE_THICK;
+                float midX = panel.x + panel.width * 0.5f;
+                float midY = panel.y + panel.height * 0.5f;
+                if (new Rect(panel.x, panel.yMax - edgeT, panel.width, edgeT).Contains(mouse))
+                    hover = mouse.x < midX ? PIP_EDGE_LEFT | PIP_EDGE_BOTTOM : PIP_EDGE_RIGHT | PIP_EDGE_BOTTOM;
+                else if (new Rect(panel.x, panel.y, panel.width, edgeT).Contains(mouse))
+                    hover = mouse.x < midX ? PIP_EDGE_LEFT | PIP_EDGE_TOP : PIP_EDGE_RIGHT | PIP_EDGE_TOP;
+                else if (new Rect(panel.xMax - edgeT, panel.y, edgeT, panel.height).Contains(mouse))
+                    hover = mouse.y < midY ? PIP_EDGE_RIGHT | PIP_EDGE_TOP : PIP_EDGE_RIGHT | PIP_EDGE_BOTTOM;
+                else if (new Rect(panel.x, panel.y, edgeT, panel.height).Contains(mouse))
+                    hover = mouse.y < midY ? PIP_EDGE_LEFT | PIP_EDGE_TOP : PIP_EDGE_LEFT | PIP_EDGE_BOTTOM;
+            }
+            return hover;
+        }
+
+        private void DrawOverlayEdgeHighlights(Rect panel, int shownEdges, float alpha)
+        {
+            if (shownEdges == 0)
+                return;
+            Color old = GUI.color;
+            float edgeT = PIP_EDGE_THICK;
+            GUI.color = new Color(0.25f, 0.62f, 0.95f, 0.55f * alpha);
+            if ((shownEdges & PIP_EDGE_TOP) != 0)
+                GUI.DrawTexture(new Rect(panel.x, panel.y, panel.width, edgeT), whiteTex);
+            if ((shownEdges & PIP_EDGE_BOTTOM) != 0)
+                GUI.DrawTexture(new Rect(panel.x, panel.yMax - edgeT, panel.width, edgeT), whiteTex);
+            float insetTop = (shownEdges & PIP_EDGE_TOP) != 0 ? edgeT : 0f;
+            float insetBottom = (shownEdges & PIP_EDGE_BOTTOM) != 0 ? edgeT : 0f;
+            if ((shownEdges & PIP_EDGE_LEFT) != 0)
+                GUI.DrawTexture(new Rect(panel.x, panel.y + insetTop, edgeT, panel.height - insetTop - insetBottom), whiteTex);
+            if ((shownEdges & PIP_EDGE_RIGHT) != 0)
+                GUI.DrawTexture(new Rect(panel.xMax - edgeT, panel.y + insetTop, edgeT, panel.height - insetTop - insetBottom), whiteTex);
+            GUI.color = old;
+        }
+
+        private void DrawStickCamCornerHighlights(Rect panel, int shownEdges)
+        {
+            if (shownEdges == 0)
+                return;
+            Color old = GUI.color;
+            float c = 20f;
+            float t = 4f;
+            GUI.color = new Color(0.25f, 0.62f, 0.95f, 0.55f);
+            if ((shownEdges & (PIP_EDGE_RIGHT | PIP_EDGE_TOP)) == (PIP_EDGE_RIGHT | PIP_EDGE_TOP))
+            {
+                GUI.DrawTexture(new Rect(panel.xMax - c, panel.y, c - t, t), whiteTex);
+                GUI.DrawTexture(new Rect(panel.xMax - t, panel.y, t, c), whiteTex);
+            }
+            if ((shownEdges & (PIP_EDGE_RIGHT | PIP_EDGE_BOTTOM)) == (PIP_EDGE_RIGHT | PIP_EDGE_BOTTOM))
+            {
+                GUI.DrawTexture(new Rect(panel.xMax - c, panel.yMax - t, c - t, t), whiteTex);
+                GUI.DrawTexture(new Rect(panel.xMax - t, panel.yMax - c, t, c), whiteTex);
+            }
+            GUI.color = old;
+        }
+
+        private int GetPiPResizeEdge(Rect panel, Vector2 mouse)
+        {
+            if (!panel.Contains(mouse))
+                return 0;
+            float cornerT = PIP_RESIZE_GRAB;
+            float edgeT = PIP_EDGE_THICK;
+            if (mouse.x <= panel.x + cornerT && mouse.y <= panel.y + cornerT)
+                return PIP_EDGE_LEFT | PIP_EDGE_TOP;
+            if (mouse.x >= panel.xMax - cornerT && mouse.y <= panel.y + cornerT)
+                return PIP_EDGE_RIGHT | PIP_EDGE_TOP;
+            if (mouse.x <= panel.x + cornerT && mouse.y >= panel.yMax - cornerT)
+                return PIP_EDGE_LEFT | PIP_EDGE_BOTTOM;
+            if (mouse.x >= panel.xMax - cornerT && mouse.y >= panel.yMax - cornerT)
+                return PIP_EDGE_RIGHT | PIP_EDGE_BOTTOM;
+            if (mouse.y <= panel.y + edgeT)
+                return PIP_EDGE_TOP;
+            if (mouse.y >= panel.yMax - edgeT)
+                return PIP_EDGE_BOTTOM;
+            if (mouse.x <= panel.x + edgeT)
+                return PIP_EDGE_LEFT;
+            if (mouse.x >= panel.xMax - edgeT)
+                return PIP_EDGE_RIGHT;
+            return 0;
+        }
+
+        private int GetPiPHoverEdge(PiPWindow w, Vector2 mouse, Rect closeBtn, bool covered)
+        {
+            if (w.resizing || w.dragging || covered || closeBtn.Contains(mouse))
+                return 0;
+            if (w.dropdownOpen && GetPiPDropdownRect(w).Contains(mouse))
+                return 0;
+            Rect panel = w.rect;
+            if (GetPiPPilotBtnRect(panel).Contains(mouse))
+                return 0;
+            if (new Rect(panel.xMax - 48f, panel.y + 3f, 18f, 18f).Contains(mouse))
+                return 0;
+            if (new Rect(panel.xMax - 72f, panel.y + 3f, 18f, 18f).Contains(mouse))
+                return 0;
+            return GetPiPResizeEdge(panel, mouse);
+        }
+
+        private void RenderPiPWindow(PiPWindow w)
+        {
+            if (w.cam == null || w.rt == null)
+                return;
+            Rect screenRect = new Rect(0f, 0f, Screen.width, Screen.height);
+            if (w.rect.width < 60f || w.rect.height < 40f || !w.rect.Overlaps(screenRect))
+                return;
+
+            Transform mount;
+            if (!ghostCamMountMap.TryGetValue(w.entry, out mount) || mount == null)
+            {
+                Transform root;
+                if (!ghostDroneMap.TryGetValue(w.entry, out root) || root == null)
+                    return;
+                mount = root;
+            }
+
+            Transform rootT;
+            float appliedT;
+            Vector3 rawPos;
+            Quaternion rawRot;
+            if (ghostDroneMap.TryGetValue(w.entry, out rootT) && rootT != null
+                && TryGetReplayTime(out appliedT)
+                && TryGetDroneTransform(w.entry, appliedT, out rawPos, out rawRot))
+            {
+                Vector3 localOffset = Quaternion.Inverse(rootT.rotation) * (mount.position - rootT.position);
+                Quaternion localRot = Quaternion.Inverse(rootT.rotation) * mount.rotation;
+                Vector3 mountPos = rawPos + rawRot * localOffset;
+                Quaternion mountRot = rawRot * localRot;
+                Vector3 camPos = mountPos
+                    + mountRot * (Vector3.forward * PIP_CAMERA_FORWARD_OFFSET)
+                    + mountRot * (Vector3.up * PIP_CAMERA_UP_OFFSET);
+                w.cam.transform.SetPositionAndRotation(camPos, mountRot);
+            }
+            else
+            {
+                Vector3 camPos = mount.position
+                    + mount.rotation * (Vector3.forward * PIP_CAMERA_FORWARD_OFFSET)
+                    + mount.rotation * (Vector3.up * PIP_CAMERA_UP_OFFSET);
+                w.cam.transform.SetPositionAndRotation(camPos, mount.rotation);
+            }
+            w.cam.Render();
+        }
+
+        private Rect GetPiPContentRect(Rect panel)
+        {
+            return new Rect(panel.x + 1f, panel.y + PIP_TITLE_HEIGHT, panel.width - 2f, panel.height - PIP_TITLE_HEIGHT - 1f);
+        }
+
+        private void ClampPiPWindowRect(PiPWindow w)
+        {
+            w.rect.x = Mathf.Clamp(w.rect.x, 0f, Mathf.Max(0f, Screen.width - w.rect.width));
+            w.rect.y = Mathf.Clamp(w.rect.y, 0f, Mathf.Max(0f, Screen.height - w.rect.height));
+        }
+
+        private string FitSettingsName(string text, float maxWidth)
+        {
+            if (string.IsNullOrEmpty(text))
+                return text;
+            if (settingsSmallStyle.CalcSize(new GUIContent(text)).x <= maxWidth)
+                return text;
+            for (int i = text.Length - 1; i > 0; i--)
+            {
+                string cut = text.Substring(0, i) + "...";
+                if (settingsSmallStyle.CalcSize(new GUIContent(cut)).x <= maxWidth)
+                    return cut;
+            }
+            return "...";
+        }
+
+        private void DrawPiPWindows()
+        {
+            EnsureSettingsStyles();
+            EnsureSettingsTextures();
+            Event e = Event.current;
+            if (pipActivated != null && pipWindows.Contains(pipActivated))
+            {
+                pipWindows.Remove(pipActivated);
+                pipWindows.Add(pipActivated);
+                pipActivated = null;
+            }
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                PiPWindow w = pipWindows[i];
+                if (w.entry == null)
+                    continue;
+                float alpha = w.fadeAmount;
+                if (alpha < 0.01f)
+                    continue;
+                Rect panel = w.rect;
+
+                Color old = GUI.color;
+                GUI.color = new Color(0f, 0f, 0f, 0.12f * alpha);
+                GUI.DrawTexture(new Rect(panel.x + 3f, panel.y + 3f, panel.width - 6f, panel.height), whiteTex);
+                GUI.color = ThemePanelBg(alpha);
+                GUI.DrawTexture(panel, whiteTex);
+                GUI.color = ThemePanelBorder(alpha);
+                GUI.DrawTexture(new Rect(panel.x, panel.y, panel.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(panel.x, panel.yMax - 1f, panel.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(panel.x, panel.y, 1f, panel.height), whiteTex);
+                GUI.DrawTexture(new Rect(panel.xMax - 1f, panel.y, 1f, panel.height), whiteTex);
+
+                Rect content = GetPiPContentRect(panel);
+
+                if (w.rt != null)
+                {
+                    GUI.color = new Color(1f, 1f, 1f, alpha);
+                    GUI.DrawTexture(content, w.rt, ScaleMode.StretchToFill, false);
+                }
+                else
+                {
+                    GUI.color = new Color(0.1f, 0.1f, 0.12f, alpha);
+                    GUI.DrawTexture(content, whiteTex);
+                }
+
+                Rect pilotBtn = GetPiPPilotBtnRect(panel);
+                Rect pinBtn = new Rect(panel.xMax - 72f, panel.y + 3f, 18f, 18f);
+                Rect plusBtn = new Rect(panel.xMax - 48f, panel.y + 3f, 18f, 18f);
+                Rect closeBtn = new Rect(panel.xMax - 24f, panel.y + 3f, 18f, 18f);
+
+                bool pilotHover = pilotBtn.Contains(e.mousePosition);
+                GUI.color = pilotHover ? new Color(1f, 1f, 1f, 0.92f * alpha) : ThemeButtonBg(alpha);
+                GUI.DrawTexture(pilotBtn, whiteTex);
+                GUI.color = ThemeButtonBorder(alpha);
+                GUI.DrawTexture(new Rect(pilotBtn.x, pilotBtn.y, pilotBtn.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(pilotBtn.x, pilotBtn.yMax - 1f, pilotBtn.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(pilotBtn.x, pilotBtn.y, 1f, pilotBtn.height), whiteTex);
+                GUI.DrawTexture(new Rect(pilotBtn.xMax - 1f, pilotBtn.y, 1f, pilotBtn.height), whiteTex);
+                GUI.color = ThemeLabel(alpha);
+                GUI.Label(new Rect(pilotBtn.x + 6f, pilotBtn.y, pilotBtn.width - 12f, pilotBtn.height),
+                    GetPilotLabel(w.entry, GhostLinesPlugin.entries.IndexOf(w.entry)), settingsSmallStyle);
+
+                if (DrawStyledToggleButton(pinBtn, iconPin, w.pinned, alpha, true, UI_LAYER_PIP))
+                {
+                    w.pinned = !w.pinned;
+                    pipActivated = w;
+                }
+
+                bool plusHover = plusBtn.Contains(e.mousePosition);
+                GUI.color = plusHover ? new Color(1f, 1f, 1f, 0.92f * alpha) : ThemeButtonBg(alpha);
+                GUI.DrawTexture(plusBtn, whiteTex);
+                GUI.color = ThemeButtonBorder(alpha);
+                GUI.DrawTexture(new Rect(plusBtn.x, plusBtn.y, plusBtn.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(plusBtn.x, plusBtn.yMax - 1f, plusBtn.width, 1f), whiteTex);
+                GUI.DrawTexture(new Rect(plusBtn.x, plusBtn.y, 1f, plusBtn.height), whiteTex);
+                GUI.DrawTexture(new Rect(plusBtn.xMax - 1f, plusBtn.y, 1f, plusBtn.height), whiteTex);
+                GUI.color = ThemeLabel(alpha);
+                GUI.Label(plusBtn, "+", settingsPlusStyle);
+
+                GUI.color = ThemeCloseLabel(alpha);
+                GUI.Label(closeBtn, "x", settingsCloseStyle);
+
+                int shownEdges = w.resizing ? w.resizeEdge : w.edgeHover;
+                if (shownEdges != 0)
+                {
+                    float edgeT = PIP_EDGE_THICK;
+                    GUI.color = new Color(0.25f, 0.62f, 0.95f, 0.55f * alpha);
+                    if ((shownEdges & PIP_EDGE_LEFT) != 0)
+                        GUI.DrawTexture(new Rect(panel.x, panel.y, edgeT, panel.height), whiteTex);
+                    if ((shownEdges & PIP_EDGE_RIGHT) != 0)
+                        GUI.DrawTexture(new Rect(panel.xMax - edgeT, panel.y, edgeT, panel.height), whiteTex);
+                    if ((shownEdges & PIP_EDGE_TOP) != 0)
+                    {
+                        float leftTrim = (shownEdges & PIP_EDGE_LEFT) != 0 ? edgeT : 0f;
+                        float rightTrim = (shownEdges & PIP_EDGE_RIGHT) != 0 ? edgeT : 0f;
+                        GUI.DrawTexture(new Rect(panel.x + leftTrim, panel.y, panel.width - leftTrim - rightTrim, edgeT), whiteTex);
+                    }
+                    if ((shownEdges & PIP_EDGE_BOTTOM) != 0)
+                    {
+                        float leftTrim = (shownEdges & PIP_EDGE_LEFT) != 0 ? edgeT : 0f;
+                        float rightTrim = (shownEdges & PIP_EDGE_RIGHT) != 0 ? edgeT : 0f;
+                        GUI.DrawTexture(new Rect(panel.x + leftTrim, panel.yMax - edgeT, panel.width - leftTrim - rightTrim, edgeT), whiteTex);
+                    }
+                }
+                GUI.color = old;
+            }
+            DrawPiPDropdowns();
+        }
+
+        private void DrawPiPDropdowns()
+        {
+            EnsureSettingsStyles();
+            EnsureSettingsTextures();
+            Event e = Event.current;
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                PiPWindow w = pipWindows[i];
+                if (w.entry == null || !w.dropdownOpen)
+                    continue;
+                float alpha = w.fadeAmount;
+                if (alpha < 0.01f)
+                    continue;
+                Rect dd = GetPiPDropdownRect(w);
+                Color ddOld = GUI.color;
+                float rowH = 20f;
+                int optCount = GhostLinesPlugin.entries.Count;
+                if (optCount == 0)
+                {
+                    GUI.color = ThemeOptionBg(alpha);
+                    GUI.DrawTexture(dd, whiteTex);
+                    GUI.color = ThemeOptionBorder(alpha);
+                    GUI.DrawTexture(new Rect(dd.x, dd.y, dd.width, 1f), whiteTex);
+                    GUI.DrawTexture(new Rect(dd.x, dd.yMax - 1f, dd.width, 1f), whiteTex);
+                    GUI.color = ThemeDimLabel(alpha);
+                    GUI.Label(new Rect(dd.x + 8f, dd.y, dd.width - 16f, rowH), "No pilots", settingsSmallStyle);
+                    GUI.color = ddOld;
+                    continue;
+                }
+                for (int pi = 0; pi < optCount; pi++)
+                {
+                    GhostLineEntry opt = GhostLinesPlugin.entries[pi];
+                    Rect optRect = new Rect(dd.x, dd.y + rowH * pi, dd.width, rowH);
+                    bool optHover = optRect.Contains(e.mousePosition);
+                    bool optSelected = opt == w.entry;
+                    GUI.color = optSelected
+                        ? new Color(0.25f, 0.62f, 0.95f, alpha)
+                        : optHover ? new Color(1f, 1f, 1f, 0.92f * alpha) : ThemeOptionBg(alpha);
+                    GUI.DrawTexture(optRect, whiteTex);
+                    GUI.color = ThemeOptionBorder(alpha);
+                    GUI.DrawTexture(new Rect(optRect.x, optRect.y, optRect.width, 1f), whiteTex);
+                    GUI.DrawTexture(new Rect(optRect.x, optRect.yMax - 1f, optRect.width, 1f), whiteTex);
+                    GUI.color = optSelected ? new Color(1f, 1f, 1f, alpha) : ThemeOptionText(alpha);
+                    GUI.Label(optRect, GetPilotLabel(opt, pi), settingsSmallStyle);
+                    if (e.type == EventType.MouseUp && e.button == 0 && optRect.Contains(e.mousePosition))
+                    {
+                        AssignPiPPilot(w, opt);
+                        w.dropdownOpen = false;
+                        pipActivated = w;
+                        e.Use();
+                    }
+                }
+                GUI.color = ddOld;
+            }
+        }
+
+        private void AssignPiPPilot(PiPWindow w, GhostLineEntry entry)
+        {
+            if (entry == null || w.entry == entry)
+                return;
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                if (pipWindows[i] != w && pipWindows[i].entry == entry)
+                    return;
+            }
+            w.entry = entry;
+            w.rtDirty = true;
+        }
+
+        private Rect GetPiPPilotBtnRect(Rect panel)
+        {
+            return new Rect(panel.x + 6f, panel.y + 3f, Mathf.Max(70f, panel.xMax - 78f - (panel.x + 6f)), 18f);
+        }
+
+        private GhostLineEntry GetPiPNextUnshownPilot()
+        {
+            for (int i = 0; i < GhostLinesPlugin.entries.Count; i++)
+            {
+                GhostLineEntry entry = GhostLinesPlugin.entries[i];
+                bool shown = false;
+                for (int j = 0; j < pipWindows.Count; j++)
+                {
+                    if (pipWindows[j].entry == entry)
+                    {
+                        shown = true;
+                        break;
+                    }
+                }
+                if (!shown)
+                    return entry;
+            }
+            return null;
+        }
+
+        private Rect GetPiPDropdownRect(PiPWindow w)
+        {
+            Rect pilotBtn = GetPiPPilotBtnRect(w.rect);
+            float rowH = 20f;
+            float ddW = pilotBtn.width;
+            float ddH = rowH * Mathf.Max(GhostLinesPlugin.entries.Count, 1);
+            float ddY = pilotBtn.yMax;
+            if (ddY + ddH > Screen.height - 4f)
+                ddY = Mathf.Max(4f, pilotBtn.y - ddH);
+            return new Rect(pilotBtn.x, ddY, ddW, ddH);
+        }
+
+        private bool IsPiPMouseBlocked(Vector2 mousePosition)
+        {
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                PiPWindow w = pipWindows[i];
+                if (w.rect.Contains(mousePosition) && w.fadeAmount > 0.01f)
+                    return true;
+                if (w.dropdownOpen && GetPiPDropdownRect(w).Contains(mousePosition))
+                    return true;
+            }
+            return false;
+        }
+
+        private const int UI_LAYER_STICKGRAPH = 2;
+        private const int UI_LAYER_SETTINGS = 3;
+        private const int UI_LAYER_BINDINGS = 4;
+        private const int UI_LAYER_PIP = 5;
+        private const int UI_LAYER_STICKCAM = 6;
+        private const int UI_LAYER_PLAYBAR = 7;
+        private int uiFrontLayer = UI_LAYER_PIP;
+
+        private bool IsUiLayerAt(int layer, Vector2 p)
+        {
+            switch (layer)
+            {
+                case UI_LAYER_STICKGRAPH:
+                    for (int i = 0; i < stickGraphs.Count; i++)
+                        if (stickGraphs[i].fadeAmount > 0.01f && stickGraphs[i].rect.Contains(p))
+                            return true;
+                    return false;
+                case UI_LAYER_SETTINGS:
+                    return settingsOpen && GetSettingsPanelRect().Contains(p);
+                case UI_LAYER_BINDINGS:
+                    return bindingsOpen && GetBindingsWindowRect().Contains(p);
+                case UI_LAYER_PIP:
+                    return IsPiPMouseBlocked(p);
+                case UI_LAYER_STICKCAM:
+                    return currentStickCamOverlayRectValid && currentStickCamOverlayRect.Contains(p);
+                case UI_LAYER_PLAYBAR:
+                    return currentPlaybackOverlayRectValid && currentPlaybackOverlayRect.Contains(p);
+                default:
+                    return false;
+            }
+        }
+
+        private int UiLayerOrder(int layer)
+        {
+            if (layer == uiFrontLayer)
+                return UI_LAYER_PLAYBAR;
+            return layer < uiFrontLayer ? layer : layer - 1;
+        }
+
+        private bool IsUiBlockedFor(int layer, Vector2 p)
+        {
+            int order = UiLayerOrder(layer);
+            for (int l = 0; l <= UI_LAYER_PLAYBAR; l++)
+            {
+                if (l == layer)
+                    continue;
+                if (UiLayerOrder(l) > order && IsUiLayerAt(l, p))
+                    return true;
+            }
+            return false;
+        }
+
         private bool IsDroneLabelInteractionBlocked(Vector2 mousePosition)
         {
             bool stickGraphBusy = false;
-            bool stickGraphHovered = false;
             for (int i = 0; i < stickGraphs.Count; i++)
             {
                 StickGraphState g = stickGraphs[i];
                 if (g.dragging || g.dragCandidate || g.resizing)
                     stickGraphBusy = true;
-                if (g.rect.Contains(mousePosition))
-                    stickGraphHovered = true;
             }
             return playbackMouseCaptured || draggingScrubber || isDraggingHandle || draggingStickCam ||
-                settingsDragging || stickSizeDragging || uiSizeDragging ||
+                settingsDragging || stickCamResizing || playbackResizing ||
                 stickGraphBusy ||
                 (currentPlaybackOverlayRectValid && currentPlaybackOverlayRect.Contains(mousePosition)) ||
                 (currentStickCamOverlayRectValid && currentStickCamOverlayRect.Contains(mousePosition)) ||
-                (settingsOpen && GetSettingsPanelRect().Contains(mousePosition)) ||
-                (bindingsOpen && GetBindingsWindowRect().Contains(mousePosition)) ||
-                stickGraphHovered;
+                IsUiBlockedFor(0, mousePosition);
         }
 
         private GhostLineEntry FindHoveredDroneLabel(Vector2 mousePosition)
@@ -8812,6 +10575,7 @@ public class GhostLinePoller : MonoBehaviour
         private void SetNameTagsVisible(bool visible)
         {
             GhostLinesPlugin.showNameTags = visible;
+            GhostLinesPlugin.SaveGlobalDisplayPreferences();
             if (!visible)
             {
                 droneLabelHitboxes.Clear();
@@ -9151,10 +10915,11 @@ private Texture2D CreateKeyboardTex()
             iconBindings = CreateKeyboardTex();
         }
 
-        private bool DrawStyledButton(Rect rect, Texture2D icon, float alpha)
+        private bool DrawStyledButton(Rect rect, Texture2D icon, float alpha, int guardLayer = -1)
         {
             Event e = Event.current;
             bool hover = rect.Contains(e.mousePosition);
+            bool blocked = guardLayer >= 0 && IsUiBlockedFor(guardLayer, e.mousePosition);
             Color old = GUI.color;
 
             float shadowOff = 2f;
@@ -9175,7 +10940,7 @@ private Texture2D CreateKeyboardTex()
 
             if (icon != null)
             {
-                float iconS = Mathf.Min(rect.width - 10, rect.height - 8, 18);
+                float iconS = Mathf.Max(Mathf.Min(rect.width - 10, rect.height - 8, 18), 10f);
                 if (icon == iconPlay)
                     iconS *= 1.15f;
                 if (icon == iconBindings)
@@ -9189,19 +10954,22 @@ private Texture2D CreateKeyboardTex()
 
             GUI.color = old;
 
-            if (e.type == EventType.MouseUp && e.button == 0 && hover)
+            if (e.type == EventType.MouseUp && e.button == 0 && hover && !blocked)
             {
                 e.Use();
+                if (guardLayer >= 0)
+                    uiFrontLayer = guardLayer;
                 return true;
             }
             return false;
         }
 
-        private bool DrawStyledToggleButton(Rect rect, Texture2D icon, bool selected, float alpha, bool allowHover = true)
+        private bool DrawStyledToggleButton(Rect rect, Texture2D icon, bool selected, float alpha, bool allowHover = true, int guardLayer = -1)
         {
             Event e = Event.current;
             bool hover = allowHover && rect.Contains(e.mousePosition);
-            if (e.type == EventType.MouseDown && e.button == 0 && hover)
+            bool blocked = guardLayer >= 0 && IsUiBlockedFor(guardLayer, e.mousePosition);
+            if (e.type == EventType.MouseDown && e.button == 0 && hover && !blocked)
                 settingsControlPressed = true;
 
             Color old = GUI.color;
@@ -9232,9 +11000,11 @@ private Texture2D CreateKeyboardTex()
             }
             GUI.color = old;
 
-            if (e.type == EventType.MouseUp && e.button == 0 && hover)
+            if (e.type == EventType.MouseUp && e.button == 0 && hover && !blocked)
             {
                 e.Use();
+                if (guardLayer >= 0)
+                    uiFrontLayer = guardLayer;
                 return true;
             }
             return false;
@@ -9314,6 +11084,16 @@ private Texture2D CreateKeyboardTex()
                     break;
                 }
             }
+            bool hoveringAnyPip = false;
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                PiPWindow pw = pipWindows[i];
+                if (pw.entry != null && pw.fadeAmount > 0.01f && pw.rect.Contains(mp))
+                {
+                    hoveringAnyPip = true;
+                    break;
+                }
+            }
             float labelW = Mathf.Max(55f * s, 54f);
             float labelInset = Mathf.Max(6f * s, 6f);
             float row1Y = barY + Mathf.Max(2f * s, 2f);
@@ -9353,7 +11133,7 @@ private Texture2D CreateKeyboardTex()
                 trimStartRect = new Rect(sMinX, hitY, sMaxX - sMinX, hitH);
                 trimEndRect = new Rect(eMinX, hitY, eMaxX - eMinX, hitH);
             }
-            bool hoveringOverlay = totalRect.Contains(mp) || trimStartRect.Contains(mp) || trimEndRect.Contains(mp) || hoveringSettings || hoveringStickCam || hoveringAnyGraph;
+            bool hoveringOverlay = totalRect.Contains(mp) || trimStartRect.Contains(mp) || trimEndRect.Contains(mp) || hoveringSettings || hoveringStickCam || hoveringAnyGraph || hoveringAnyPip;
             float playbackTarget = mouseStillTimer < 0.8f ? 1f : 0f;
             if (hoveringOverlay || Time.time < replayEnterTime + 3f || playbackPinned) playbackTarget = 1f;
             fadeAmount = Mathf.Lerp(fadeAmount, playbackTarget, Time.deltaTime * 6f);
@@ -9391,6 +11171,19 @@ private Texture2D CreateKeyboardTex()
                 g.fadeAmount = Mathf.Lerp(g.fadeAmount, stickGraphTarget, Time.deltaTime * 6f);
             }
 
+            for (int i = 0; i < pipWindows.Count; i++)
+            {
+                PiPWindow pw = pipWindows[i];
+                if (pw.entry == null) continue;
+                if (pw.pinned)
+                {
+                    pw.fadeAmount = 1f;
+                    continue;
+                }
+                float pipTarget = mouseStillTimer < 0.8f || hoveringOverlay || hoveringAnyPip || pw.dropdownOpen ? 1f : 0f;
+                pw.fadeAmount = Mathf.Lerp(pw.fadeAmount, pipTarget, Time.deltaTime * 6f);
+            }
+
             if (fadeAmount < 0.01f) return;
 
             EnsurePlaybackTimeStyles(s);
@@ -9419,26 +11212,28 @@ private Texture2D CreateKeyboardTex()
             GUI.DrawTexture(new Rect(totalRect.x, totalRect.y, bd, totalRect.height), whiteTex);
             GUI.DrawTexture(new Rect(totalRect.xMax - bd, totalRect.y, bd, totalRect.height), whiteTex);
 
+            DrawOverlayEdgeHighlights(totalRect, playbackResizing ? playbackResizeEdge : playbackEdgeHover, fadeAmount);
+
             EnsureIcons();
             Texture2D playTex = isPlaying ? iconPause : iconPlay;
-            if (DrawStyledButton(btnPlayRect, playTex, fadeAmount))
+            if (DrawStyledButton(btnPlayRect, playTex, fadeAmount, UI_LAYER_PLAYBAR))
             {
                 Debug.Log("[GhostLines] GUI: play pressed");
                 RequestPlayButton();
             }
-            if (DrawStyledButton(btnRewindRect, iconRewind, fadeAmount))
+            if (DrawStyledButton(btnRewindRect, iconRewind, fadeAmount, UI_LAYER_PLAYBAR))
             {
                 Debug.Log("[GhostLines] GUI: rewind pressed");
                 ClickGameButton("btnRewind");
             }
-            if (DrawStyledButton(btnFFRect, iconFF, fadeAmount))
+            if (DrawStyledButton(btnFFRect, iconFF, fadeAmount, UI_LAYER_PLAYBAR))
             {
                 Debug.Log("[GhostLines] GUI: ff pressed");
                 ClickGameButton("btnFastForward");
             }
-            if (DrawStyledToggleButton(btnLoopRect, iconLoop, loopReplayEnabled, fadeAmount))
+            if (DrawStyledToggleButton(btnLoopRect, iconLoop, loopReplayEnabled, fadeAmount, true, UI_LAYER_PLAYBAR))
                 loopReplayEnabled = !loopReplayEnabled;
-            if (DrawStyledToggleButton(btnTrimRect, iconTrim, trimEnabled, fadeAmount))
+            if (DrawStyledToggleButton(btnTrimRect, iconTrim, trimEnabled, fadeAmount, true, UI_LAYER_PLAYBAR))
             {
                 trimEnabled = !trimEnabled;
                 if (trimEnabled && trimEnd <= 0f)
@@ -9455,7 +11250,7 @@ private Texture2D CreateKeyboardTex()
             GUI.Label(speedRect, playbackSpeed.ToString("0.##") + "x", playbackSpeedStyle);
 
             Rect btnSettingsRect = new Rect(btnTrimRect.xMax + 4f * s, row2Y, btnW, btnH);
-            if (DrawStyledButton(btnSettingsRect, iconSettings, fadeAmount))
+            if (DrawStyledButton(btnSettingsRect, iconSettings, fadeAmount, UI_LAYER_PLAYBAR))
             {
                 settingsOpen = !settingsOpen;
                 SaveSettingsPanelOpen(settingsOpen);
@@ -9466,7 +11261,7 @@ private Texture2D CreateKeyboardTex()
                 }
             }
             Rect btnBindingsRect = new Rect(btnSettingsRect.xMax + 4f * s, row2Y, btnW, btnH);
-            if (DrawStyledButton(btnBindingsRect, iconBindings, fadeAmount))
+            if (DrawStyledButton(btnBindingsRect, iconBindings, fadeAmount, UI_LAYER_PLAYBAR))
             {
                 bindingsOpen = !bindingsOpen;
                 if (bindingsOpen)
@@ -9476,7 +11271,7 @@ private Texture2D CreateKeyboardTex()
                 }
             }
             Rect btnPinRect = new Rect(btnBindingsRect.xMax + 4f * s, row2Y, pinW, btnH);
-            if (DrawStyledToggleButton(btnPinRect, iconPin, playbackPinned, fadeAmount))
+            if (DrawStyledToggleButton(btnPinRect, iconPin, playbackPinned, fadeAmount, true, UI_LAYER_PLAYBAR))
                 playbackPinned = !playbackPinned;
 
             bool onControl = sliderRect.Contains(mp) || btnPlayRect.Contains(mp)
@@ -9485,15 +11280,19 @@ private Texture2D CreateKeyboardTex()
                           || trimStartRect.Contains(mp) || trimEndRect.Contains(mp)
                           || btnSettingsRect.Contains(mp) || btnBindingsRect.Contains(mp) || btnPinRect.Contains(mp);
             var ev = Event.current;
-            if (ev.type == EventType.MouseDown && ev.button == 0 && totalRect.Contains(mp) && !onControl)
+            if (ev.type == EventType.MouseDown && ev.button == 0 && totalRect.Contains(mp) && !onControl && !IsUiBlockedFor(UI_LAYER_PLAYBAR, mp))
             {
-                draggingScrubber = true;
-                playbackMouseCaptured = true;
-                isOrbiting = false;
-                CancelCameraLook();
-                scrubberPositionCustomized = true;
-                dragStartMouse = mp;
-                dragStartBarPos = new Vector2(scrubberX, scrubberY);
+                uiFrontLayer = UI_LAYER_PLAYBAR;
+                if (!playbackResizing && playbackEdgeHover == 0)
+                {
+                    draggingScrubber = true;
+                    playbackMouseCaptured = true;
+                    isOrbiting = false;
+                    CancelCameraLook();
+                    scrubberPositionCustomized = true;
+                    dragStartMouse = mp;
+                    dragStartBarPos = new Vector2(scrubberX, scrubberY);
+                }
                 ev.Use();
             }
             if (draggingScrubber)
@@ -9513,6 +11312,14 @@ private Texture2D CreateKeyboardTex()
                     scrubberY = Mathf.Clamp(dragStartBarPos.y + offset.y, barH * 0.5f + 2f, Screen.height - barH * 0.5f);
                     ev.Use();
                 }
+            }
+            else if (playbackResizing && ev.type == EventType.MouseUp && ev.button == 0)
+            {
+                playbackResizing = false;
+                playbackResizeEdge = 0;
+                SaveCurrentOverlayPositions();
+                SaveDisplayPreferences();
+                ev.Use();
             }
 
             float currentTime = Mathf.Max(0f, val);
@@ -9573,8 +11380,10 @@ private Texture2D CreateKeyboardTex()
             GUI.DrawTexture(new Rect(handleRect.xMax - hb, handleRect.y, hb, handleRect.height), whiteTex);
 
             if (ce.type == EventType.MouseDown && ce.button == 0 && (hHit || tHit) && !isDraggingHandle
-                && !trimStartRect.Contains(ce.mousePosition) && !trimEndRect.Contains(ce.mousePosition))
+                && !trimStartRect.Contains(ce.mousePosition) && !trimEndRect.Contains(ce.mousePosition)
+                && !IsUiBlockedFor(UI_LAYER_PLAYBAR, ce.mousePosition))
             {
+                uiFrontLayer = UI_LAYER_PLAYBAR;
                 float nn = Mathf.Clamp01((ce.mousePosition.x - tX) / tW);
                 bool allowSeek = true;
                 if (trimEnabled)
@@ -9675,8 +11484,9 @@ private Texture2D CreateKeyboardTex()
                 GUI.DrawTexture(new Rect(endFlag.xMax - tb, endFlag.y, tb, endFlag.height), whiteTex);
 
                 if (ce.type == EventType.MouseDown && ce.button == 0 && (startHit || endHit)
-                    && !isDraggingHandle && !draggingScrubber)
+                    && !isDraggingHandle && !draggingScrubber && !IsUiBlockedFor(UI_LAYER_PLAYBAR, ce.mousePosition))
                 {
+                    uiFrontLayer = UI_LAYER_PLAYBAR;
                     draggingTrimStart = startHit;
                     draggingTrimEnd = endHit;
                     playbackMouseCaptured = true;
@@ -9735,19 +11545,18 @@ private Texture2D CreateKeyboardTex()
         {
             int pilotCount = GhostLinesPlugin.entries.Count == 0 ? 1 : GhostLinesPlugin.entries.Count;
             float height = 42f;
+            height += 20f + 28f * pilotCount;
+            height += 18f * 4f;
             height += 34f * 4f;
-            height += 30f;
-            height += 20f;
-            height += 28f * pilotCount;
-            height += 34f + 30f + 30f;
-            height += 34f + 34f + 34f;
+            height += 34f * 2f;
+            height += 30f * 3f;
             return height + 12f;
         }
 
         private void EnsureSettingsPanelRect(bool initializePosition = true)
         {
             float panelH = GetSettingsPanelHeight();
-            float panelW = 304f;
+            float panelW = 320f;
             if (initializePosition && settingsRect.x < 0f)
             {
                 float defaultX = Screen.width - panelW - 24f;
@@ -9803,6 +11612,14 @@ private Texture2D CreateKeyboardTex()
                 settingsSectionStyle = new GUIStyle(settingsLabelStyle);
                 settingsSectionStyle.fontSize = 10;
                 settingsSectionStyle.fontStyle = FontStyle.Bold;
+                settingsSectionStyle.alignment = TextAnchor.MiddleCenter;
+                settingsSmallRightStyle = new GUIStyle(settingsSmallStyle);
+                settingsSmallRightStyle.alignment = TextAnchor.MiddleRight;
+                settingsSectionRightStyle = new GUIStyle(settingsSectionStyle);
+                settingsSectionRightStyle.alignment = TextAnchor.MiddleRight;
+                settingsSectionLeftStyle = new GUIStyle(settingsSectionStyle);
+                settingsSectionLeftStyle.alignment = TextAnchor.MiddleLeft;
+                settingsSectionLeftStyle.clipping = TextClipping.Overflow;
             }
             if (darkMode)
             {
@@ -9812,6 +11629,12 @@ private Texture2D CreateKeyboardTex()
                 settingsSectionStyle.normal.textColor = new Color(0.6f, 0.6f, 0.62f);
                 if (settingsAxisLabelStyle != null)
                     settingsAxisLabelStyle.normal.textColor = new Color(0.74f, 0.74f, 0.76f);
+                if (settingsSmallRightStyle != null)
+                    settingsSmallRightStyle.normal.textColor = new Color(0.74f, 0.74f, 0.76f);
+                if (settingsSectionRightStyle != null)
+                    settingsSectionRightStyle.normal.textColor = new Color(0.6f, 0.6f, 0.62f);
+                if (settingsSectionLeftStyle != null)
+                    settingsSectionLeftStyle.normal.textColor = new Color(0.6f, 0.6f, 0.62f);
             }
             else
             {
@@ -9821,7 +11644,15 @@ private Texture2D CreateKeyboardTex()
                 settingsSectionStyle.normal.textColor = new Color(0.25f, 0.25f, 0.25f);
                 if (settingsAxisLabelStyle != null)
                     settingsAxisLabelStyle.normal.textColor = new Color(0.38f, 0.38f, 0.38f);
+                if (settingsSmallRightStyle != null)
+                    settingsSmallRightStyle.normal.textColor = new Color(0.38f, 0.38f, 0.38f);
+                if (settingsSectionRightStyle != null)
+                    settingsSectionRightStyle.normal.textColor = new Color(0.25f, 0.25f, 0.25f);
+                if (settingsSectionLeftStyle != null)
+                    settingsSectionLeftStyle.normal.textColor = new Color(0.25f, 0.25f, 0.25f);
             }
+            settingsTooltipStyle = new GUIStyle(settingsSmallStyle);
+            settingsTooltipStyle.normal.textColor = darkMode ? Color.white : new Color(0.1f, 0.1f, 0.1f);
         }
 
         private Texture2D CreateTargetTexture(int size, int kind)
@@ -9872,11 +11703,12 @@ private Texture2D CreateKeyboardTex()
         private Color ThemeButtonBorder(float alpha) { return darkMode ? new Color(0.5f, 0.5f, 0.52f, 0.55f * alpha) : new Color(0.35f, 0.35f, 0.35f, 0.5f * alpha); }
         private Color ThemeButtonIcon(float alpha) { return darkMode ? new Color(0.88f, 0.88f, 0.88f, alpha) : new Color(0.2f, 0.2f, 0.2f, alpha); }
 
-        private bool DrawSettingsOption(Rect rect, string label, bool selected, float alpha, TextAnchor align = TextAnchor.MiddleLeft)
+        private bool DrawSettingsOption(Rect rect, string label, bool selected, float alpha, TextAnchor align = TextAnchor.MiddleLeft, int guardLayer = -1)
         {
             Event e = Event.current;
             bool hover = rect.Contains(e.mousePosition);
-            if (e.type == EventType.MouseDown && e.button == 0 && hover)
+            bool blocked = guardLayer >= 0 && IsUiBlockedFor(guardLayer, e.mousePosition);
+            if (e.type == EventType.MouseDown && e.button == 0 && hover && !blocked)
                 settingsControlPressed = true;
             Color old = GUI.color;
             GUI.color = selected
@@ -9894,9 +11726,11 @@ private Texture2D CreateKeyboardTex()
             GUIStyle labelStyle = align == TextAnchor.MiddleCenter ? settingsSmallCenterStyle : settingsSmallStyle;
             GUI.Label(rect, label, labelStyle);
             GUI.color = old;
-            if (e.type == EventType.MouseUp && e.button == 0 && hover)
+            if (e.type == EventType.MouseUp && e.button == 0 && hover && !settingsDragging && !blocked)
             {
                 e.Use();
+                if (guardLayer >= 0)
+                    uiFrontLayer = guardLayer;
                 return true;
             }
             return false;
@@ -9906,7 +11740,8 @@ private Texture2D CreateKeyboardTex()
         {
             Event e = Event.current;
             bool hover = rect.Contains(e.mousePosition);
-            if (e.type == EventType.MouseDown && e.button == 0 && hover)
+            bool pipBlocked = IsUiBlockedFor(UI_LAYER_SETTINGS, e.mousePosition);
+            if (e.type == EventType.MouseDown && e.button == 0 && hover && !pipBlocked)
                 settingsControlPressed = true;
             Color old = GUI.color;
             GUI.color = enabled
@@ -9918,7 +11753,7 @@ private Texture2D CreateKeyboardTex()
             float knobX = enabled ? rect.xMax - knob - 2f : rect.x + 2f;
             GUI.DrawTexture(new Rect(knobX, rect.y + 2f, knob, knob), whiteTex);
             GUI.color = old;
-            if (e.type == EventType.MouseUp && e.button == 0 && hover)
+            if (e.type == EventType.MouseUp && e.button == 0 && hover && !settingsDragging && !pipBlocked)
             {
                 e.Use();
                 return true;
@@ -9926,12 +11761,32 @@ private Texture2D CreateKeyboardTex()
             return false;
         }
 
-        private bool DrawSettingsTarget(Rect rect, bool selected, float alpha)
+        private float DrawSettingsSectionDivider(float x, float w, float y, string label, float alpha)
+        {
+            Color prev = GUI.color;
+            GUI.color = darkMode ? new Color(0.88f, 0.9f, 0.93f, alpha) : new Color(0.25f, 0.25f, 0.28f, alpha);
+            GUI.Label(new Rect(x + 4f, y, 180f, 16f), label, settingsSectionLeftStyle);
+            GUI.color = darkMode ? new Color(1f, 1f, 1f, 0.25f * alpha) : new Color(0.38f, 0.38f, 0.4f, 0.7f * alpha);
+            GUI.DrawTexture(new Rect(x, y + 15f, w, 1f), whiteTex);
+            GUI.color = prev;
+            return y + 18f;
+        }
+
+        private bool DrawSettingsTarget(Rect rect, bool selected, float alpha, int column, int rowIndex)
         {
             Event e = Event.current;
             bool hover = rect.Contains(e.mousePosition);
-            if (e.type == EventType.MouseDown && e.button == 0 && hover)
+            bool blocked = IsUiBlockedFor(UI_LAYER_SETTINGS, e.mousePosition);
+            if (e.type == EventType.MouseDown && e.button == 0 && hover && !blocked)
+            {
                 settingsControlPressed = true;
+                settingsDragSelecting = true;
+                settingsDragSelectMoved = false;
+                settingsDragSelectColumn = column;
+                settingsDragSelectStartValue = selected;
+                settingsDragSelectLastIndex = rowIndex;
+                settingsDragSelectProcessed.Clear();
+            }
             Color old = GUI.color;
             if (selected)
             {
@@ -9946,12 +11801,79 @@ private Texture2D CreateKeyboardTex()
                 GUI.DrawTexture(rect, targetRingTex);
             }
             GUI.color = old;
-            if (e.type == EventType.MouseUp && e.button == 0 && hover)
+            if (e.type == EventType.MouseUp && e.button == 0 && hover && !settingsDragging && !settingsDragSelectMoved && !blocked)
             {
                 e.Use();
                 return true;
             }
             return false;
+        }
+
+        private void HandleSettingsRadioDrag(int rowIndex, int column, Rect rect)
+        {
+            Event e = Event.current;
+            if (e.type != EventType.MouseDrag || e.button != 0)
+                return;
+            if (!settingsDragSelecting || settingsDragSelectColumn != column)
+                return;
+            if (!rect.Contains(e.mousePosition))
+                return;
+            if (rowIndex == settingsDragSelectLastIndex)
+                return;
+            settingsDragSelectMoved = true;
+            if (column == 0)
+            {
+                if (rowIndex >= 0 && rowIndex < GhostLinesPlugin.entries.Count)
+                    referenceEntry = GhostLinesPlugin.entries[rowIndex];
+            }
+            else
+            {
+                int min = Mathf.Min(settingsDragSelectLastIndex, rowIndex);
+                int max = Mathf.Max(settingsDragSelectLastIndex, rowIndex);
+                bool target = !settingsDragSelectStartValue;
+                for (int r = min; r <= max; r++)
+                    if (settingsDragSelectProcessed.Add(r))
+                        ApplySettingsRadioState(r, column, target);
+            }
+            settingsDragSelectLastIndex = rowIndex;
+        }
+
+        private void ApplySettingsRadioState(int rowIndex, int column, bool value)
+        {
+            if (rowIndex < 0 || rowIndex >= GhostLinesPlugin.entries.Count)
+                return;
+            GhostLineEntry entry = GhostLinesPlugin.entries[rowIndex];
+            switch (column)
+            {
+                case 0:
+                    if (value)
+                        referenceEntry = entry;
+                    else if (referenceEntry == entry)
+                        referenceEntry = null;
+                    break;
+                case 1:
+                    entry.deltaDisplayVisible = value;
+                    break;
+                case 2:
+                    entry.nameTagVisible = value;
+                    break;
+                case 3:
+                    bool open = false;
+                    for (int j = 0; j < pipWindows.Count; j++)
+                    {
+                        if (pipWindows[j].entry == entry)
+                        {
+                            open = true;
+                            break;
+                        }
+                    }
+                    if (open != value)
+                        TogglePiPWindow(entry);
+                    break;
+                case 4:
+                    SetRaceLineVisible(entry, value);
+                    break;
+            }
         }
 
         private void DrawSettingsSlider(Rect trackRect, float min, float max, float alpha, ref bool dragging, ref float value)
@@ -9974,14 +11896,15 @@ private Texture2D CreateKeyboardTex()
 
             Rect handleRect = new Rect(handleX - handleW / 2f, trackRect.y + (trackRect.height - handleH) / 2f, handleW, handleH);
             Event ce = Event.current;
+            bool pipBlocked = IsUiBlockedFor(UI_LAYER_SETTINGS, ce.mousePosition);
             bool hHit = new Rect(handleRect.x - 4f, handleRect.y - 4f, handleRect.width + 8f, handleRect.height + 8f).Contains(ce.mousePosition);
             bool tHit = trackRect.Contains(ce.mousePosition);
-            if (ce.type == EventType.MouseDown && ce.button == 0 && (hHit || tHit))
+            if (ce.type == EventType.MouseDown && ce.button == 0 && !pipBlocked && (hHit || tHit))
                 settingsControlPressed = true;
             GUI.color = hHit ? new Color(1f, 1f, 1f, alpha) : ThemeHandle(alpha);
             GUI.DrawTexture(handleRect, whiteTex);
 
-            if (ce.type == EventType.MouseDown && (hHit || tHit) && !dragging)
+            if (ce.type == EventType.MouseDown && !pipBlocked && (hHit || tHit) && !dragging)
             {
                 dragging = true;
                 value = min + Mathf.Clamp01((ce.mousePosition.x - tX) / tW) * range;
@@ -10025,9 +11948,11 @@ private Texture2D CreateKeyboardTex()
             Event e = Event.current;
             Rect close = new Rect(panel.xMax - 30f, panel.y + 7f, 22f, 20f);
             Rect pin = new Rect(panel.xMax - 60f, panel.y + 7f, 22f, 20f);
-            if (e.type == EventType.MouseDown && e.button == 0 && panel.Contains(e.mousePosition) && !close.Contains(e.mousePosition))
+            if (e.type == EventType.MouseDown && e.button == 0 && panel.Contains(e.mousePosition) && !close.Contains(e.mousePosition)
+                && !IsUiBlockedFor(UI_LAYER_BINDINGS, e.mousePosition))
             {
                 bindingsDragCandidate = true;
+                uiFrontLayer = UI_LAYER_BINDINGS;
                 bindingsDragOffset = e.mousePosition - new Vector2(panel.x, panel.y);
             }
             if (bindingsDragging && e.type == EventType.MouseDrag && e.button == 0)
@@ -10046,7 +11971,7 @@ private Texture2D CreateKeyboardTex()
             GUI.color = ThemeLabel(alpha);
             GUI.Label(new Rect(panel.x + 14f, panel.y + 7f, 220f, 20f), "Control Bindings", settingsHeaderStyle);
             EnsureIcons();
-            if (DrawStyledToggleButton(pin, iconPin, bindingsPinned, alpha))
+            if (DrawStyledToggleButton(pin, iconPin, bindingsPinned, alpha, true, UI_LAYER_BINDINGS))
                 bindingsPinned = !bindingsPinned;
             GUI.color = ThemeCloseLabel(alpha);
             GUI.Label(close, "x", settingsCloseStyle);
@@ -10110,7 +12035,7 @@ private Texture2D CreateKeyboardTex()
 
                 Rect keyRect = new Rect(btnX, ry + (rowH - btnH) / 2f, btnW, btnH);
                 string keyText = listening ? "Press key..." : GhostLinesPlugin.BindingKeyName(id);
-                if (DrawSettingsOption(keyRect, keyText, listening, alpha, TextAnchor.MiddleCenter))
+                if (DrawSettingsOption(keyRect, keyText, listening, alpha, TextAnchor.MiddleCenter, UI_LAYER_BINDINGS))
                 {
                     bindingListeningFor = listening ? null : id;
                     bindingListeningJustStarted = true;
@@ -10118,7 +12043,7 @@ private Texture2D CreateKeyboardTex()
             }
 
             Rect resetRect = new Rect(panel.x + (panel.width - 104f) / 2f, listBottom + 6f, 104f, 20f);
-            if (DrawSettingsOption(resetRect, "Reset Defaults", false, alpha, TextAnchor.MiddleCenter))
+            if (DrawSettingsOption(resetRect, "Reset Defaults", false, alpha, TextAnchor.MiddleCenter, UI_LAYER_BINDINGS))
             {
                 bindingListeningFor = null;
                 GhostLinesPlugin.ResetAllBindings();
@@ -10222,11 +12147,21 @@ private Texture2D CreateKeyboardTex()
             Event e = Event.current;
             Rect close = new Rect(panel.xMax - 30f, panel.y + 7f, 22f, 20f);
             Rect pin = new Rect(panel.xMax - 60f, panel.y + 7f, 22f, 20f);
-            if (e.type == EventType.MouseDown && e.button == 0 && panel.Contains(e.mousePosition) && !close.Contains(e.mousePosition))
+            if (e.type == EventType.MouseDown && e.button == 0 && panel.Contains(e.mousePosition) && !close.Contains(e.mousePosition)
+                && !IsUiBlockedFor(UI_LAYER_SETTINGS, e.mousePosition))
             {
                 settingsDragCandidate = true;
                 settingsControlPressed = false;
+                uiFrontLayer = UI_LAYER_SETTINGS;
                 settingsDragOffset = e.mousePosition - new Vector2(panel.x, panel.y);
+            }
+            if (settingsDragCandidate && e.type == EventType.MouseDrag && e.button == 0 && !close.Contains(e.mousePosition))
+            {
+                if (!settingsControlPressed)
+                {
+                    settingsDragging = true;
+                    settingsPanelPositionCustomized = true;
+                }
             }
             if (settingsDragging && e.type == EventType.MouseDrag && e.button == 0)
             {
@@ -10235,17 +12170,11 @@ private Texture2D CreateKeyboardTex()
                 EnsureSettingsPanelRect(false);
                 e.Use();
             }
-            if (settingsDragging && e.type == EventType.MouseUp && e.button == 0)
-            {
-                settingsDragging = false;
-                SaveCurrentOverlayPositions();
-                e.Use();
-            }
 
             GUI.color = ThemeLabel(alpha);
             GUI.Label(new Rect(panel.x + 14f, panel.y + 7f, 220f, 20f), "Settings", settingsHeaderStyle);
             EnsureIcons();
-            if (DrawStyledToggleButton(pin, iconPin, settingsPinned, alpha))
+            if (DrawStyledToggleButton(pin, iconPin, settingsPinned, alpha, true, UI_LAYER_SETTINGS))
                 settingsPinned = !settingsPinned;
             GUI.color = ThemeCloseLabel(alpha);
             GUI.Label(close, "x", settingsCloseStyle);
@@ -10256,6 +12185,12 @@ private Texture2D CreateKeyboardTex()
                 settingsControlPressed = false;
                 settingsDragCandidate = false;
                 settingsDragging = false;
+                pipFarSliderDragging = false;
+                settingsDragSelecting = false;
+                settingsDragSelectMoved = false;
+                settingsDragSelectColumn = -1;
+                settingsDragSelectLastIndex = -1;
+                settingsDragSelectProcessed.Clear();
                 e.Use();
                 GUI.color = old;
                 return;
@@ -10268,45 +12203,224 @@ private Texture2D CreateKeyboardTex()
             foreach (var entry in GhostLinesPlugin.entries)
                 if (entry.visible) { anyVisible = true; break; }
 
-            GUI.color = ThemeLabel(alpha);
-            GUI.Label(new Rect(x, y, 190f, 24f), "Race Lines", settingsLabelStyle);
-            if (DrawSettingsToggle(new Rect(panel.xMax - 48f, y + 3f, 30f, 18f), anyVisible, alpha))
-                SetAllRaceLinesVisible(!anyVisible);
-            y += 34f;
+            string headerTip;
+            y = DrawPilotRows(panel, x, w, alpha, y, out headerTip);
 
-            GUI.Label(new Rect(x, y, 190f, 24f), "Show Lines Through Objects", settingsLabelStyle);
-            if (DrawSettingsToggle(new Rect(panel.xMax - 48f, y + 3f, 30f, 18f), GhostLinesPlugin.linesThroughObjects, alpha))
+            GUI.color = ThemeLabel(alpha);
+            y = DrawSettingsSectionDivider(x, w, y, "Lines", alpha);
+
+            float halfW = w * 0.5f;
+            float col1ToggleX = x + halfW - 48f;
+            float col2X = x + halfW;
+            float col2ToggleX = col2X + halfW - 48f;
+            float colLabelW = halfW - 48f;
+
+            GUI.Label(new Rect(x, y, colLabelW, 24f), "Race Lines", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col1ToggleX, y + 3f, 30f, 18f), anyVisible, alpha))
+                SetAllRaceLinesVisible(!anyVisible);
+            GUI.Label(new Rect(col2X, y, colLabelW, 24f), "Through Objects", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col2ToggleX, y + 3f, 30f, 18f), GhostLinesPlugin.linesThroughObjects, alpha))
                 GhostLinesPlugin.SetLinesThroughObjects(!GhostLinesPlugin.linesThroughObjects);
             y += 34f;
 
-            GUI.Label(new Rect(x, y, 190f, 24f), "Delta Display", settingsLabelStyle);
-            if (DrawSettingsToggle(new Rect(panel.xMax - 48f, y + 3f, 30f, 18f), GhostLinesPlugin.showDeltaDisplay, alpha))
-                GhostLinesPlugin.showDeltaDisplay = !GhostLinesPlugin.showDeltaDisplay;
+            GUI.Label(new Rect(x, y, colLabelW, 24f), "Line Smoothing", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col1ToggleX, y + 3f, 30f, 18f), GhostLinesPlugin.smoothingEnabled, alpha))
+                GhostLinesPlugin.ToggleSmoothing();
+            GUI.Label(new Rect(col2X, y, colLabelW, 24f), "Speed Heatmap", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col2ToggleX, y + 3f, 30f, 18f), GhostLinesPlugin.speedHeatmapEnabled, alpha))
+                GhostLinesPlugin.ToggleSpeedHeatmap();
             y += 34f;
 
-            GUI.Label(new Rect(x, y, 190f, 24f), "Name Tags", settingsLabelStyle);
-            if (DrawSettingsToggle(new Rect(panel.xMax - 48f, y + 3f, 30f, 18f), GhostLinesPlugin.showNameTags, alpha))
+            GUI.color = ThemeLabel(alpha);
+            y = DrawSettingsSectionDivider(x, w, y, "Overlay", alpha);
+
+            GUI.Label(new Rect(x, y, colLabelW, 24f), "Delta Display", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col1ToggleX, y + 3f, 30f, 18f), GhostLinesPlugin.showDeltaDisplay, alpha))
+                GhostLinesPlugin.SetDeltaDisplay(!GhostLinesPlugin.showDeltaDisplay);
+            GUI.Label(new Rect(col2X, y, colLabelW, 24f), "Name Tags", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col2ToggleX, y + 3f, 30f, 18f), GhostLinesPlugin.showNameTags, alpha))
                 SetNameTagsVisible(!GhostLinesPlugin.showNameTags);
             y += 34f;
 
             GUI.color = ThemeLabel(alpha);
-            float optionGap = 6f;
-            bool smoothSelected = GhostLinesPlugin.smoothingEnabled;
-            float buttonPad = 16f;
-            float smoothW = settingsSmallStyle.CalcSize(new GUIContent("Smooth")).x + buttonPad;
-            float originalW = settingsSmallStyle.CalcSize(new GUIContent("Original")).x + buttonPad;
-            float visualOptionsW = smoothW + optionGap + originalW;
-            float visualOptionsX = panel.xMax - 14f - visualOptionsW;
-            GUI.Label(new Rect(x, y, visualOptionsX - x - 8f, 22f), "Race Line Visual", settingsLabelStyle);
-            if (DrawSettingsOption(new Rect(visualOptionsX, y - 2f, smoothW, 22f), "Smooth", smoothSelected, alpha, TextAnchor.MiddleCenter) && !smoothSelected)
-                GhostLinesPlugin.ToggleSmoothing();
-            if (DrawSettingsOption(new Rect(visualOptionsX + smoothW + optionGap, y - 2f, originalW, 22f), "Original", !smoothSelected, alpha, TextAnchor.MiddleCenter) && smoothSelected)
-                GhostLinesPlugin.ToggleSmoothing();
-            y += 30f;
+            y = DrawSettingsSectionDivider(x, w, y, "Effects/UI", alpha);
+
+            GUI.Label(new Rect(x, y, colLabelW, 24f), "Dark Mode", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col1ToggleX, y + 3f, 30f, 18f), darkMode, alpha))
+            {
+                darkMode = !darkMode;
+                SaveDisplayPreferences();
+            }
+            GUI.Label(new Rect(col2X, y, colLabelW, 24f), "Xray", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col2ToggleX, y + 3f, 30f, 18f), xrayEnabled, alpha))
+                SetXrayEnabled(!xrayEnabled);
+            y += 34f;
+
+            GUI.Label(new Rect(x, y, colLabelW, 24f), "Stick Cam", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col1ToggleX, y + 3f, 30f, 18f), stickCamEnabled, alpha))
+            {
+                stickCamEnabled = !stickCamEnabled;
+                SaveDisplayPreferences();
+            }
+            GUI.Label(new Rect(col2X, y, colLabelW, 24f), "Drone Trails", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(col2ToggleX, y + 3f, 30f, 18f), smoothDroneTrails, alpha))
+                SetSmoothDroneTrails(!smoothDroneTrails);
+            y += 34f;
 
             GUI.color = ThemeLabel(alpha);
-            GUI.Label(new Rect(x, y, 120f, 18f), "Line", settingsSectionStyle);
-            GUI.Label(new Rect(panel.xMax - 116f, y, 78f, 18f), "Delta", settingsSectionStyle);
+            y = DrawSettingsSectionDivider(x, w, y, "Picture in Picture", alpha);
+
+            float pipToggleLabelW = settingsLabelStyle.CalcSize(new GUIContent("Picture in Picture")).x;
+            GUI.Label(new Rect(x, y, pipToggleLabelW, 24f), "Picture in Picture", settingsLabelStyle);
+            if (DrawSettingsToggle(new Rect(x + pipToggleLabelW + 12f, y + 3f, 30f, 18f), pipEnabled, alpha))
+                SetPipEnabled(!pipEnabled);
+            y += 34f;
+
+            GUI.Label(new Rect(x, y, 110f, 20f), "PIP Refresh Rate", settingsLabelStyle);
+            float pipGap = 6f;
+            float pipPad = 16f;
+            float pipAutoW = settingsSmallStyle.CalcSize(new GUIContent("Auto")).x + pipPad;
+            float pip15W = settingsSmallStyle.CalcSize(new GUIContent("15 Hz")).x + pipPad;
+            float pip30W = settingsSmallStyle.CalcSize(new GUIContent("30 Hz")).x + pipPad;
+            float pip60W = settingsSmallStyle.CalcSize(new GUIContent("60 Hz")).x + pipPad;
+            float pipBtnsX = panel.xMax - 14f - (pipAutoW + pipGap + pip15W + pipGap + pip30W + pipGap + pip60W);
+            if (DrawSettingsOption(new Rect(pipBtnsX, y - 2f, pipAutoW, 22f), "Auto", pipRefreshAuto, alpha, TextAnchor.MiddleCenter, UI_LAYER_SETTINGS) && !pipRefreshAuto)
+                SetPipRefreshAuto(true);
+            if (DrawSettingsOption(new Rect(pipBtnsX + pipAutoW + pipGap, y - 2f, pip15W, 22f), "15 Hz", !pipRefreshAuto && pipRefreshHz == 15, alpha, TextAnchor.MiddleCenter, UI_LAYER_SETTINGS))
+                SetPipRefreshHz(15);
+            if (DrawSettingsOption(new Rect(pipBtnsX + pipAutoW + pipGap + pip15W + pipGap, y - 2f, pip30W, 22f), "30 Hz", !pipRefreshAuto && pipRefreshHz == 30, alpha, TextAnchor.MiddleCenter, UI_LAYER_SETTINGS))
+                SetPipRefreshHz(30);
+            if (DrawSettingsOption(new Rect(pipBtnsX + pipAutoW + pipGap + pip15W + pipGap + pip30W + pipGap, y - 2f, pip60W, 22f), "60 Hz", !pipRefreshAuto && pipRefreshHz == 60, alpha, TextAnchor.MiddleCenter, UI_LAYER_SETTINGS))
+                SetPipRefreshHz(60);
+            y += 30f;
+
+            GUI.Label(new Rect(x, y, 110f, 20f), "PIP Resolution", settingsLabelStyle);
+            float pip25W = settingsSmallStyle.CalcSize(new GUIContent("25%")).x + pipPad;
+            float pip50W = settingsSmallStyle.CalcSize(new GUIContent("50%")).x + pipPad;
+            float pip75W = settingsSmallStyle.CalcSize(new GUIContent("75%")).x + pipPad;
+            float pip100W = settingsSmallStyle.CalcSize(new GUIContent("100%")).x + pipPad;
+            float pipResBtnsX = panel.xMax - 14f - (pip25W + pipGap + pip50W + pipGap + pip75W + pipGap + pip100W);
+            if (DrawSettingsOption(new Rect(pipResBtnsX, y - 2f, pip25W, 22f), "25%", pipResolutionScale == 0.25f, alpha, TextAnchor.MiddleCenter, UI_LAYER_SETTINGS) && pipResolutionScale != 0.25f)
+                SetPipResolutionScale(0.25f);
+            if (DrawSettingsOption(new Rect(pipResBtnsX + pip25W + pipGap, y - 2f, pip50W, 22f), "50%", pipResolutionScale == 0.5f, alpha, TextAnchor.MiddleCenter, UI_LAYER_SETTINGS) && pipResolutionScale != 0.5f)
+                SetPipResolutionScale(0.5f);
+            if (DrawSettingsOption(new Rect(pipResBtnsX + pip25W + pipGap + pip50W + pipGap, y - 2f, pip75W, 22f), "75%", pipResolutionScale == 0.75f, alpha, TextAnchor.MiddleCenter, UI_LAYER_SETTINGS) && pipResolutionScale != 0.75f)
+                SetPipResolutionScale(0.75f);
+            if (DrawSettingsOption(new Rect(pipResBtnsX + pip25W + pipGap + pip50W + pipGap + pip75W + pipGap, y - 2f, pip100W, 22f), "100%", pipResolutionScale == 1f, alpha, TextAnchor.MiddleCenter, UI_LAYER_SETTINGS) && pipResolutionScale != 1f)
+                SetPipResolutionScale(1f);
+            y += 30f;
+
+            GUI.Label(new Rect(x, y, 110f, 20f), "PIP Draw Distance", settingsLabelStyle);
+            float distTrackW = 110f;
+            float distValW = 46f;
+            float distTrackX = panel.xMax - 14f - distValW - 6f - distTrackW;
+            Rect distTrack = new Rect(distTrackX, y + 8f, distTrackW, 6f);
+            Rect distValRect = new Rect(panel.xMax - 14f - distValW, y, distValW, 20f);
+            Rect distHandle = new Rect(distTrack.x + Mathf.Clamp01((pipFarClip - 25f) / 225f) * (distTrack.width - 10f), distTrack.y - 4f, 10f, 14f);
+            bool distHit = distHandle.Contains(e.mousePosition) || distTrack.Contains(e.mousePosition);
+            if (e.type == EventType.MouseDown && e.button == 0 && distHit && !IsUiBlockedFor(UI_LAYER_SETTINGS, e.mousePosition))
+            {
+                pipFarSliderDragging = true;
+                settingsDragCandidate = false;
+                settingsDragging = false;
+                settingsControlPressed = false;
+                ApplyPipFarClipFromSliderX(e.mousePosition.x, distTrack);
+                e.Use();
+            }
+            if (pipFarSliderDragging && e.type == EventType.MouseDrag && e.button == 0)
+            {
+                ApplyPipFarClipFromSliderX(e.mousePosition.x, distTrack);
+                e.Use();
+            }
+            if (pipFarSliderDragging && e.type == EventType.MouseUp && e.button == 0)
+            {
+                pipFarSliderDragging = false;
+                SavePipFarClip();
+            }
+            GUI.color = darkMode ? new Color(0.2f, 0.22f, 0.26f, alpha) : new Color(0.6f, 0.6f, 0.62f, alpha);
+            GUI.DrawTexture(distTrack, whiteTex);
+            GUI.color = pipFarSliderDragging || distHit ? new Color(0.25f, 0.62f, 0.95f, alpha) : darkMode ? new Color(0.7f, 0.72f, 0.76f, alpha) : new Color(0.42f, 0.42f, 0.45f, alpha);
+            GUI.DrawTexture(distHandle, whiteTex);
+            GUI.color = ThemeLabel(alpha);
+            GUI.Label(distValRect, Mathf.RoundToInt(pipFarClip) + "m", settingsSmallRightStyle);
+            y += 30f;
+
+            if (e.type == EventType.MouseUp && e.button == 0)
+            {
+                if (settingsDragging)
+                {
+                    settingsDragging = false;
+                    SaveCurrentOverlayPositions();
+                    e.Use();
+                }
+                settingsControlPressed = false;
+                settingsDragCandidate = false;
+                settingsDragSelecting = false;
+                settingsDragSelectMoved = false;
+                settingsDragSelectColumn = -1;
+                settingsDragSelectLastIndex = -1;
+                settingsDragSelectProcessed.Clear();
+            }
+
+            if (headerTip != null)
+            {
+                Vector2 mousePos = Event.current.mousePosition;
+                float tipW = 230f;
+                float tipH = 20f;
+                float tipX = Mathf.Clamp(mousePos.x + 16f, 4f, Screen.width - tipW - 4f);
+                float tipY = Mathf.Clamp(mousePos.y + 20f, 4f, Screen.height - tipH - 4f);
+                if (darkMode)
+                {
+                    GUI.color = new Color(0.05f, 0.05f, 0.06f, 0.95f * alpha);
+                    GUI.DrawTexture(new Rect(tipX, tipY, tipW, tipH), whiteTex);
+                    GUI.color = new Color(0.35f, 0.55f, 0.8f, alpha);
+                    GUI.DrawTexture(new Rect(tipX, tipY, tipW, 1f), whiteTex);
+                    GUI.DrawTexture(new Rect(tipX, tipY + tipH - 1f, tipW, 1f), whiteTex);
+                    GUI.DrawTexture(new Rect(tipX, tipY, 1f, tipH), whiteTex);
+                    GUI.DrawTexture(new Rect(tipX + tipW - 1f, tipY, 1f, tipH), whiteTex);
+                    GUI.color = new Color(1f, 1f, 1f, alpha);
+                    GUI.Label(new Rect(tipX + 6f, tipY + 2f, tipW - 12f, tipH - 4f), headerTip, settingsTooltipStyle);
+                }
+                else
+                {
+                    GUI.color = new Color(0f, 0f, 0f, alpha);
+                    GUI.DrawTexture(new Rect(tipX - 1f, tipY - 1f, tipW + 2f, tipH + 2f), whiteTex);
+                    GUI.color = new Color(1f, 1f, 1f, alpha);
+                    GUI.DrawTexture(new Rect(tipX, tipY, tipW, tipH), whiteTex);
+                    GUI.color = new Color(1f, 1f, 1f, alpha);
+                    GUI.Label(new Rect(tipX + 6f, tipY + 2f, tipW - 12f, tipH - 4f), headerTip, settingsTooltipStyle);
+                }
+            }
+
+            GUI.color = old;
+        }
+
+        private float DrawPilotRows(Rect panel, float x, float w, float alpha, float colTop, out string headerTip)
+        {
+            Event e = Event.current;
+            float y = colTop;
+            GUI.color = ThemeLabel(alpha);
+            Rect headerDelta = new Rect(panel.xMax - 200f, y, 40f, 18f);
+            Rect headerRef = new Rect(panel.xMax - 159f, y, 36f, 18f);
+            Rect headerDText = new Rect(panel.xMax - 131f, y, 36f, 18f);
+            Rect headerTag = new Rect(panel.xMax - 103f, y, 36f, 18f);
+            Rect headerPip = new Rect(panel.xMax - 75f, y, 36f, 18f);
+            Rect headerLine = new Rect(panel.xMax - 47f, y, 36f, 18f);
+            GUI.Label(headerDelta, "Delta", settingsSectionRightStyle);
+            GUI.Label(headerRef, "Ref", settingsSectionStyle);
+            GUI.Label(headerDText, "DText", settingsSectionStyle);
+            GUI.Label(headerTag, "Tag", settingsSectionStyle);
+            GUI.Label(headerPip, "PIP", settingsSectionStyle);
+            GUI.Label(headerLine, "Line", settingsSectionStyle);
+            GUI.Label(new Rect(x, y, 100f, 18f), "Pilots", settingsSectionLeftStyle);
+            Vector2 mousePos = e.mousePosition;
+            headerTip = null;
+            if (headerDelta.Contains(mousePos)) headerTip = "Seconds ahead/behind vs the reference pilot";
+            else if (headerRef.Contains(mousePos)) headerTip = "Reference pilot for delta times";
+            else if (headerDText.Contains(mousePos)) headerTip = "Delta text floating above this drone";
+            else if (headerTag.Contains(mousePos)) headerTip = "Name tag floating above this drone";
+            else if (headerPip.Contains(mousePos)) headerTip = "Picture-in-picture window for this pilot";
+            else if (headerLine.Contains(mousePos)) headerTip = "Ghost race line for this pilot";
             y += 20f;
             if (GhostLinesPlugin.entries.Count == 0)
             {
@@ -10322,77 +12436,49 @@ private Texture2D CreateKeyboardTex()
                     Color entryColor = entry.color;
                     GUI.color = new Color(entryColor.r, entryColor.g, entryColor.b, alpha);
                     GUI.DrawTexture(new Rect(x, y + 2f, 18f, 18f), whiteTex);
-                    if (DrawSettingsToggle(new Rect(x + 28f, y + 2f, 30f, 18f), entry.visible, alpha))
-                        SetRaceLineVisible(entry, !entry.visible);
 
                     string name = string.IsNullOrEmpty(entry.pilotName) ? "Pilot " + (i + 1) : entry.pilotName;
                     string delta = string.IsNullOrEmpty(entry.guiDeltaText) ? "" : entry.guiDeltaText;
                     GUI.color = ThemeLabel(alpha);
-                    GUI.Label(new Rect(x + 68f, y, panel.width - 198f, 22f), name, settingsSmallStyle);
-                    GUI.Label(new Rect(panel.xMax - 116f, y, 78f, 22f), delta, settingsSmallStyle);
+                    GUI.Label(new Rect(x + 28f, y, panel.width - 244f, 22f), FitSettingsName(name, panel.width - 244f), settingsSmallStyle);
+                    GUI.Label(new Rect(panel.xMax - 200f, y, 40f, 22f), delta, settingsSmallRightStyle);
                     bool isReference = entry == referenceEntry;
-                    if (DrawSettingsTarget(new Rect(panel.xMax - 38f, y + 3f, 18f, 18f), isReference, alpha))
+                    if (DrawSettingsTarget(new Rect(panel.xMax - 150f, y + 3f, 18f, 18f), isReference, alpha, 0, i))
                         referenceEntry = isReference ? null : entry;
+                    HandleSettingsRadioDrag(i, 0, new Rect(panel.xMax - 150f, y + 3f, 18f, 18f));
+                    if (DrawSettingsTarget(new Rect(panel.xMax - 122f, y + 3f, 18f, 18f), entry.deltaDisplayVisible, alpha, 1, i))
+                        entry.deltaDisplayVisible = !entry.deltaDisplayVisible;
+                    HandleSettingsRadioDrag(i, 1, new Rect(panel.xMax - 122f, y + 3f, 18f, 18f));
+                    if (DrawSettingsTarget(new Rect(panel.xMax - 94f, y + 3f, 18f, 18f), entry.nameTagVisible, alpha, 2, i))
+                        entry.nameTagVisible = !entry.nameTagVisible;
+                    HandleSettingsRadioDrag(i, 2, new Rect(panel.xMax - 94f, y + 3f, 18f, 18f));
+                    bool pipOpen = false;
+                    for (int j = 0; j < pipWindows.Count; j++)
+                    {
+                        if (pipWindows[j].entry == entry)
+                        {
+                            pipOpen = true;
+                            break;
+                        }
+                    }
+                    if (DrawSettingsTarget(new Rect(panel.xMax - 66f, y + 3f, 18f, 18f), pipOpen, alpha, 3, i))
+                        TogglePiPWindow(entry);
+                    HandleSettingsRadioDrag(i, 3, new Rect(panel.xMax - 66f, y + 3f, 18f, 18f));
+                    if (DrawSettingsTarget(new Rect(panel.xMax - 38f, y + 3f, 18f, 18f), entry.visible, alpha, 4, i))
+                        SetRaceLineVisible(entry, !entry.visible);
+                    HandleSettingsRadioDrag(i, 4, new Rect(panel.xMax - 38f, y + 3f, 18f, 18f));
                     y += 28f;
                 }
             }
 
-            GUI.Label(new Rect(x, y, 190f, 24f), "Stick Cam", settingsLabelStyle);
-            if (DrawSettingsToggle(new Rect(panel.xMax - 48f, y + 3f, 30f, 18f), stickCamEnabled, alpha))
-            {
-                stickCamEnabled = !stickCamEnabled;
-                SaveDisplayPreferences();
-            }
-            y += 34f;
-
-            GUI.Label(new Rect(x, y, 110f, 20f), "Stick Cam Size", settingsLabelStyle);
-            float previousStickCamSize = stickCamSize;
-            DrawSettingsSlider(new Rect(x + 116f, y + 4f, panel.xMax - 14f - (x + 116f), 16f), 0.5f, 1.8f, alpha, ref stickSizeDragging, ref stickCamSize);
-            if (!Mathf.Approximately(previousStickCamSize, stickCamSize))
-                SaveDisplayPreferences();
-            y += 30f;
-
-            GUI.Label(new Rect(x, y, 110f, 20f), "Playback UI Size", settingsLabelStyle);
-            float previousPlaybackUiSize = playbackUiSize;
-            DrawSettingsSlider(new Rect(x + 116f, y + 4f, panel.xMax - 14f - (x + 116f), 16f), 0.6f, 1.6f, alpha, ref uiSizeDragging, ref playbackUiSize);
-            if (!Mathf.Approximately(previousPlaybackUiSize, playbackUiSize))
-                SaveDisplayPreferences();
-            y += 30f;
-
-            GUI.Label(new Rect(x, y, 190f, 24f), "Xray", settingsLabelStyle);
-            if (DrawSettingsToggle(new Rect(panel.xMax - 48f, y + 3f, 30f, 18f), xrayEnabled, alpha))
-                SetXrayEnabled(!xrayEnabled);
-            y += 34f;
-
-            GUI.Label(new Rect(x, y, 190f, 24f), "Dark Mode", settingsLabelStyle);
-            if (DrawSettingsToggle(new Rect(panel.xMax - 48f, y + 3f, 30f, 18f), darkMode, alpha))
-            {
-                darkMode = !darkMode;
-                SaveDisplayPreferences();
-            }
-            y += 34f;
-
+            GUI.color = ThemeOptionBorder(alpha);
+            GUI.DrawTexture(new Rect(panel.xMax - 155f, colTop + 18f, 1f, y - colTop - 22f), whiteTex);
+            GUI.DrawTexture(new Rect(panel.xMax - 127f, colTop + 18f, 1f, y - colTop - 22f), whiteTex);
+            GUI.DrawTexture(new Rect(panel.xMax - 99f, colTop + 18f, 1f, y - colTop - 22f), whiteTex);
+            GUI.DrawTexture(new Rect(panel.xMax - 71f, colTop + 18f, 1f, y - colTop - 22f), whiteTex);
+            GUI.DrawTexture(new Rect(panel.xMax - 43f, colTop + 18f, 1f, y - colTop - 22f), whiteTex);
             GUI.color = ThemeLabel(alpha);
-            GUI.Label(new Rect(x, y, 190f, 24f), "Speed Heatmap", settingsLabelStyle);
-            if (DrawSettingsToggle(new Rect(panel.xMax - 48f, y + 3f, 30f, 18f), GhostLinesPlugin.speedHeatmapEnabled, alpha))
-                GhostLinesPlugin.ToggleSpeedHeatmap();
-            y += 34f;
-
-            if (e.type == EventType.MouseDown && e.button == 0 && settingsDragCandidate)
-            {
-                if (!settingsControlPressed)
-                {
-                    settingsDragging = true;
-                    settingsPanelPositionCustomized = true;
-                    e.Use();
-                }
-                settingsDragCandidate = false;
-            }
-
-            if (e.type == EventType.MouseUp && e.button == 0)
-                settingsControlPressed = false;
-
-            GUI.color = old;
+            return y;
         }
         } // GhostLinePoller
     } // GhostLinesPlugin
@@ -10433,6 +12519,24 @@ private Texture2D CreateKeyboardTex()
                 source.LogError(message);
             else
                 UnityEngine.Debug.LogError(message);
+        }
+
+        private static string logFilePath = null;
+
+        public static void LogFile(object message)
+        {
+            try
+            {
+                if (logFilePath == null)
+                    logFilePath = System.IO.Path.Combine(
+                        System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                        "ghostlines_delta.log");
+                string line = "[" + System.DateTime.Now.ToString("HH:mm:ss.fff") + "] " + message;
+                System.IO.File.AppendAllText(logFilePath, line + System.Environment.NewLine);
+            }
+            catch
+            {
+            }
         }
     }
 } // namespace

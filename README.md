@@ -1,11 +1,11 @@
 # LiftoffReplayPlus
 
-Liftoff Replay Plus is an unofficial BepInEx mod for Liftoff 1.7.5 that adds playback controls, race-line visualization, delta comparison, name tags, orbit camera, freecam, rebindable control bindings, Xray, Speed Heatmap, Dark Mode, a stick input graph, and various quality of life changes. It is not affiliated with Liftoff or its developers.
+Liftoff Replay Plus is an unofficial BepInEx mod for Liftoff 1.7.5 that adds enhanced playback controls, race-line visualization, accurate delta comparison, name tags, orbit camera, input analysis, freecam, picture-in-picture replay windows, rebindable controls, xray, speed heatmap, dark mode, smooth custom drone trails, resizable stick input graphs, and other quality-of-life improvements. It is not affiliated with Liftoff or its developers.
 
 A massive thank you to <span style="color: purple;">H.K.</span> for helping bug test during development.
 
 <p align="center">
-  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/PlaybackUI.gif" alt="Playback bar" width="760">
+  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/PlaybackUI2.gif" alt="Playback bar" width="760">
 </p>
 
 ## Requirements
@@ -33,17 +33,16 @@ Use the standalone `LiftoffReplayPlus.dll` instead:
 
 ## User Interface
 
-The default Liftoff UI has been removed and fully revamped. It consists of the Playback bar, the Stick Cam overlay, the Settings panel, and the Control Bindings window.
+The default Liftoff UI has been removed and fully revamped. It consists of the Playback bar, the Stick Cam overlay, the Settings panel, Input Graph, PIP windows, and the Control Bindings window.
 
 <p align="center">
-  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/screenshot-ui.png" alt="User interface" width="430">
-  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/Settingsmenu.gif" alt="Settings panel" width="300">
+  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/Screenshotui.png" alt="User interface" width="620">
 </p>
 
 - **Fully draggable** - every element, including the playback bar and the Stick Cam overlay, can be dragged anywhere on the screen.
-- **Resizable** - the size of both the playback bar and the Stick Cam overlay can be changed from the Settings panel.
+- **Resizable** - the playback bar, Stick Cam overlay, input graphs, and PIP windows can be resized from their edges or corners.
 - **Pinnable** - use the pin button to keep the playback bar (or an open window) on screen instead of fading away when the mouse is idle.
-- **Persistent** - overlay positions and sizes, Dark Mode, Stick Cam, key bindings, and the Settings panel's open/closed state are saved through BepInEx preferences and restored on the next launch. Certain settings are not persisted.
+- **Persistent** - overlay positions and sizes, Dark Mode, Stick Cam, Drone Trails, PIP settings, key bindings, and the Settings panel's open/closed state are saved through BepInEx preferences and restored on the next launch. Certain per-replay settings are not persisted.
 
 ## Leaderboard Menu
 
@@ -64,13 +63,21 @@ The leaderboard screen includes a few quality-of-life improvements:
 Every selected pilot's flight path is drawn as a colored race line, so you can rewatch a lap and study where each drone raced. Toggle lines with `L` to see all pilots at once, or use the Settings panel (settings gear icon) to show only specific pilot lines.
 
 - **Race Lines** - each pilot has their own colored line, with a Smooth or Original visual and a Show Lines Through Objects option in the Settings.
-- **Delta Display** (`M`) - shows how far ahead or behind each drone is versus the reference pilot (marked next to the target button). Delta values are updated live for the finished lap.
+- **Delta Display** (`M`) - shows how far ahead or behind each drone is versus the reference pilot (marked next to the target button). Delta matching uses drone position, path geometry, direction, and time continuity for improved accuracy around corners, crossings, and close passes.
 - **Name Tags** (`N`) - each drone carries an in-world name tag, so it is easy to tell who is who, even while flying around.
 
 <p align="center">
   <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/RacelinesNametags.gif" alt="Toggling race lines, deltas and name tags" width="420">
-  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/RacelineDeltaControls.png" alt="Race line controls settings" width="280">
+  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/RacelineDeltaControls2.png" alt="Race line controls settings" width="280">
 </p>
+
+### Smooth Drone Trails
+
+Optional custom trails can be enabled in Settings -> Effects/UI.
+
+- Uses smooth world-space line trails instead of Liftoff's jagged native trails.
+- Each trail follows the pilot's race-line color and fades/tapers toward its older end.
+- Trail history is capped and movement-sampled to keep the performance impact low.
 
 ### Xray
 
@@ -104,6 +111,18 @@ Open the Stick Graph for the spectated pilot with `G` or by double-clicking the 
   <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/InputGraph.gif" alt="Stick graph showing stick inputs" width="420">
 </p>
 
+### Picture in Picture
+
+Open optional FPV replay windows for individual pilots from the replay interface.
+
+- Move, resize, pin, and close each PIP window independently.
+- Choose automatic or fixed 15 Hz, 30 Hz, or 60 Hz refresh rates.
+- Choose the PIP render resolution and draw distance.
+
+<p align="center">
+  <img src="https://github.com/Dapacaa/LiftoffReplayPlus/releases/download/media/PIP.gif" alt="Picture-in-picture replay windows" width="620">
+</p>
+
 ### Replay Trim
 
 Trim the replay to focus on a specific section, for example studying one gate sequence over and over without the replay running past it. The trimmed region is highlighted orange on the slider and on the stick graphs.
@@ -117,10 +136,9 @@ Trim the replay to focus on a specific section, for example studying one gate se
 
 ## Camera Zoom
 
-`Z` toggles camera zoom in freecam or third-person view - the camera smoothly zooms in on the spectated drone. The zoom is distance-adaptive: the closer the drone, the stronger the zoom, so it roughly frames the drone wherever it flies.
+`Z` toggles camera zoom in freecam or third-person view - the camera smoothly zooms in on the spectated drone.
 
 - **Scroll wheel** while zoomed zooms further in or out, down to 2° FOV for close inspection.
-- Name tags, deltas, the vertical line, and the camera all track the same smoothed drone position, so nothing jitters or lags during zoom.
 - Press `Z` again to zoom back out.
 
 <p align="center">
