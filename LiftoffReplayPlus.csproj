@@ -1,14 +1,17 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <AssemblyName>LiftoffReplayPlus</AssemblyName>
-    <Description>Replay tools and ghost-line visualization for Liftoff</Description>
+    <Description>Replay and multiplayer tools for Liftoff</Description>
     <Authors>Dapacaa</Authors>
-    <Version>1.4.0</Version>
+    <Copyright>Copyright (c) 2026 Dapacaa</Copyright>
+    <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
+    <Version>1.5.0</Version>
     <LiftoffDir Condition="'$(LiftoffDir)' == ''">D:\SteamLibrary\steamapps\common\Liftoff</LiftoffDir>
     <GameManagedDir Condition="'$(GameManagedDir)' == ''">$(LiftoffDir)\Liftoff_Data\Managed</GameManagedDir>
-    <BepInExCoreDir Condition="'$(BepInExCoreDir)' == ''">$(LiftoffDir)\BepInEx\core</BepInExCoreDir>
+    <BepInExCoreDir Condition="'$(BepInExCoreDir)' == '' And Exists('$(LiftoffDir)\BepInEx\core')">$(LiftoffDir)\BepInEx\core</BepInExCoreDir>
+    <BepInExCoreDir Condition="'$(BepInExCoreDir)' == ''">$(LiftoffDir)\BepInEx_\core</BepInExCoreDir>
   </PropertyGroup>
 
   <Target Name="ValidateLiftoffReferences" BeforeTargets="ResolveReferences">
@@ -47,13 +50,13 @@
       <Private>false</Private>
     </Reference>
 
-    <!-- The Unity Input library (Required for keyboard F8 press) -->
+    <!-- Legacy Input (keyboard and mouse) -->
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>$(GameManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
 
-    <!-- Unity IMGUI module for OnGUI debug text -->
+    <!-- IMGUI, which draws all of the mod's windows -->
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>$(GameManagedDir)\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>
@@ -77,9 +80,35 @@
       <Private>false</Private>
     </Reference>
 
-    <!-- The Game's Main Code (Where LocalGhostStatesRecording lives) -->
+    <!-- The game's own code -->
     <Reference Include="Assembly-CSharp">
       <HintPath>$(GameManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Steamworks.NET (workshop subscribe/download for MP tracks) -->
+    <Reference Include="com.rlabrecque.steamworks.net">
+      <HintPath>$(GameManagedDir)\com.rlabrecque.steamworks.net.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Photon PUN2 (multiplayer rooms, pilots and the lobby browser) -->
+    <Reference Include="Photon3Unity3D">
+      <HintPath>$(GameManagedDir)\Photon3Unity3D.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PhotonRealtime">
+      <HintPath>$(GameManagedDir)\PhotonRealtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PhotonUnityNetworking">
+      <HintPath>$(GameManagedDir)\PhotonUnityNetworking.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Rewired (the game's input system) for freecam input suppression -->
+    <Reference Include="Rewired_Core">
+      <HintPath>$(GameManagedDir)\Rewired_Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

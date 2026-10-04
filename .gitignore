@@ -22,3 +22,6 @@ types.txt
 *.user
 *.suo
 *.userprefs
+
+# Internal notes, kept local
+REVIEW.md

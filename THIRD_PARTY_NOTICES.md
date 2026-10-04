@@ -14,4 +14,4 @@ The full release package includes the following third-party components. They are
 
 The corresponding UnityDoorstop source archive is provided with the release assets because `winhttp.dll` is LGPL-2.1 software. The source archive is not part of the game-installation ZIP.
 
-The Liftoff Replay Plus plugin itself is distributed under the MIT License in the repository root. Liftoff and Unity are proprietary products and are not redistributed by this project.
+The Liftoff Replay Plus plugin itself is distributed under the Mozilla Public License 2.0 (`LICENSE` in the repository root). Liftoff and Unity are proprietary products and are not redistributed by this project.
