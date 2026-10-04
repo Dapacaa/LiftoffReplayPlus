@@ -18,7 +18,7 @@ namespace LiftoffGhostLines
     {
         public const string PluginGuid = "com.dapa.liftoff.replayplus";
         public const string PluginName = "Liftoff Replay Plus";
-        public const string PluginVersion = "1.5.0";
+        public const string PluginVersion = "1.5.1";
 
         public static List<GhostLineEntry> entries = new List<GhostLineEntry>();
         internal static List<GhostLineEntry> recordingCandidates = new List<GhostLineEntry>();

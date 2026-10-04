@@ -614,10 +614,6 @@ namespace LiftoffGhostLines
         private float mpZoomTransitionUntil = 0f;
         private float mpZoomTransitionStartYaw = 0f;
         private float mpZoomTransitionStartPitch = 0f;
-        private Vector3 mpZoomTrackPos;
-        private bool mpZoomTrackValid = false;
-        private MultiplayerPipTarget mpZoomTrackTarget = null;
-        private const float MP_ZOOM_TRACK_TAU = 0.08f;
         private bool mpShowDroneNames = false;
         private GUIStyle mpNameLabelStyle = null;
         private int mpRadioStartRow = -1;

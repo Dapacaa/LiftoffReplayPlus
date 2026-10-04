@@ -7,7 +7,7 @@
     <Authors>Dapacaa</Authors>
     <Copyright>Copyright (c) 2026 Dapacaa</Copyright>
     <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
-    <Version>1.5.0</Version>
+    <Version>1.5.1</Version>
     <LiftoffDir Condition="'$(LiftoffDir)' == ''">D:\SteamLibrary\steamapps\common\Liftoff</LiftoffDir>
     <GameManagedDir Condition="'$(GameManagedDir)' == ''">$(LiftoffDir)\Liftoff_Data\Managed</GameManagedDir>
     <BepInExCoreDir Condition="'$(BepInExCoreDir)' == '' And Exists('$(LiftoffDir)\BepInEx\core')">$(LiftoffDir)\BepInEx\core</BepInExCoreDir>

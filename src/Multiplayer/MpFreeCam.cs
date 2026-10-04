@@ -135,12 +135,54 @@ namespace LiftoffGhostLines
             return GetMpZoomSortedAt(mpZoomPilotIndex);
         }
 
+        private bool TryGetMpZoomAimPoint(out Vector3 point)
+        {
+            point = Vector3.zero;
+            MultiplayerPipTarget spec = GetMpZoomTarget();
+            if (spec == null)
+                return false;
+            if (spec.mount != null)
+                point = spec.mount.position;
+            else if (spec.root != null)
+                point = spec.root.position;
+            else
+                return false;
+            return true;
+        }
+
+        // Points the zoom camera at the pilot. Called just before the main camera
+        // renders: by then the game has moved the drone for this frame. Aiming
+        // from Update read some frames before the drone moved (jitter), and the
+        // old 80ms smoothing on top made the camera trail the drone.
+        private void AimMpZoom()
+        {
+            Vector3 dronePos;
+            if (!mpZoomActive || !TryGetMpZoomAimPoint(out dronePos))
+                return;
+            Vector3 toPilot = dronePos - mpFreeCamPosition;
+            float dist = toPilot.magnitude;
+            if (dist < 0.0001f)
+                return;
+            float targetYaw = Mathf.Atan2(toPilot.x, toPilot.z) * Mathf.Rad2Deg;
+            float targetPitch = -Mathf.Asin(Mathf.Clamp(toPilot.y / dist, -1f, 1f)) * Mathf.Rad2Deg;
+            if (Time.unscaledTime < mpZoomTransitionUntil)
+            {
+                float remaining = Mathf.Clamp01((mpZoomTransitionUntil - Time.unscaledTime) / ZOOM_TRANSITION_DURATION);
+                float eased = 1f - remaining * remaining;
+                mpFreeCamYaw = Mathf.LerpAngle(mpZoomTransitionStartYaw, targetYaw, eased);
+                mpFreeCamPitch = Mathf.LerpAngle(mpZoomTransitionStartPitch, targetPitch, eased);
+            }
+            else
+            {
+                mpFreeCamYaw = targetYaw;
+                mpFreeCamPitch = targetPitch;
+            }
+        }
+
         private void UpdateMpHoldZoom()
         {
             if (!mpZoomActive && !mpZoomFovCaptured)
                 return;
-            if (!mpZoomActive)
-                mpZoomTrackValid = false;
             Camera camera = Camera.main;
             if (camera == null)
                 return;
@@ -154,47 +196,13 @@ namespace LiftoffGhostLines
             if (!mpZoomFovCaptured)
                 return;
             float baseFov;
-            MultiplayerPipTarget spec = GetMpZoomTarget();
-            if (mpZoomActive && spec != null)
+            Vector3 dronePos;
+            if (mpZoomActive && TryGetMpZoomAimPoint(out dronePos))
             {
-                Vector3 dronePos = Vector3.zero;
-                if (spec.mount != null)
-                    dronePos = spec.mount.position;
-                else if (spec.root != null)
-                    dronePos = spec.root.position;
-                if (!mpZoomTrackValid || mpZoomTrackTarget != spec)
-                {
-                    mpZoomTrackPos = dronePos;
-                    mpZoomTrackValid = true;
-                    mpZoomTrackTarget = spec;
-                }
-                else
-                {
-                    float tk = 1f - Mathf.Exp(-Time.unscaledDeltaTime / MP_ZOOM_TRACK_TAU);
-                    mpZoomTrackPos = Vector3.Lerp(mpZoomTrackPos, dronePos, tk);
-                }
-                float droneDist = Vector3.Distance(mpFreeCamPosition, mpZoomTrackPos);
+                // Zoom level only; the aim is set at render time (AimMpZoom).
+                float droneDist = Vector3.Distance(mpFreeCamPosition, dronePos);
                 float farFactor = 1f - Mathf.Exp(-droneDist / 8f);
                 baseFov = Mathf.Lerp(mpZoomNormalFov, HOLD_ZOOM_MIN_FOV, farFactor);
-                Vector3 toPilot = mpZoomTrackPos - mpFreeCamPosition;
-                float trackDist = toPilot.magnitude;
-                if (trackDist > 0.0001f)
-                {
-                    float targetYaw = Mathf.Atan2(toPilot.x, toPilot.z) * Mathf.Rad2Deg;
-                    float targetPitch = -Mathf.Asin(Mathf.Clamp(toPilot.y / trackDist, -1f, 1f)) * Mathf.Rad2Deg;
-                    if (Time.unscaledTime < mpZoomTransitionUntil)
-                    {
-                        float remaining = Mathf.Clamp01((mpZoomTransitionUntil - Time.unscaledTime) / ZOOM_TRANSITION_DURATION);
-                        float eased = 1f - remaining * remaining;
-                        mpFreeCamYaw = Mathf.LerpAngle(mpZoomTransitionStartYaw, targetYaw, eased);
-                        mpFreeCamPitch = Mathf.LerpAngle(mpZoomTransitionStartPitch, targetPitch, eased);
-                    }
-                    else
-                    {
-                        mpFreeCamYaw = targetYaw;
-                        mpFreeCamPitch = targetPitch;
-                    }
-                }
             }
             else
             {

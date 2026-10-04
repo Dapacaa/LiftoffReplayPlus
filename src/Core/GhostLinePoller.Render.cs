@@ -60,6 +60,7 @@ namespace LiftoffGhostLines
             {
                 if (mpFreeCamActive)
                 {
+                    AimMpZoom();
                     cam.transform.position = mpFreeCamPosition;
                     cam.transform.rotation = Quaternion.Euler(mpFreeCamPitch, mpFreeCamYaw, 0f);
                     if (mpZoomFovCaptured)
